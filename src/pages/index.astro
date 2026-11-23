@@ -1,0 +1,37 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import PostList from '../components/PostList.astro';
+import { SITE_TITLE, SITE_DESCRIPTION } from '../consts';
+import { buildCategoryTree, getPublishedPosts } from '../lib/posts';
+import { withBase } from '../lib/url';
+
+const posts = await getPublishedPosts();
+const categories = buildCategoryTree(posts);
+---
+
+<BaseLayout>
+  <section class="page-hero">
+    <h1>{SITE_TITLE}</h1>
+    <p>{SITE_DESCRIPTION}</p>
+  </section>
+
+  <section>
+    <h2 class="section-title">카테고리</h2>
+    <div class="category-cards">
+      {
+        categories.map((category) => (
+          <a class="category-card" href={withBase(`/categories/${category.path}/`)}>
+            <strong>{category.name}</strong>
+            <span>{category.count}개의 글</span>
+          </a>
+        ))
+      }
+    </div>
+  </section>
+
+  <section>
+    <h2 class="section-title">최근 글</h2>
+    <PostList posts={posts.slice(0, 10)} />
+    {posts.length > 10 && <a class="more-link" href={withBase('/categories/')}>전체 글 보기 →</a>}
+  </section>
+</BaseLayout>

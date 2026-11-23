@@ -1,0 +1,65 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import PostList from '../../components/PostList.astro';
+import {
+  buildCategoryTree,
+  flattenCategoryTree,
+  getPublishedPosts,
+  postsInCategory,
+  type CategoryNode,
+} from '../../lib/posts';
+import { withBase } from '../../lib/url';
+
+export async function getStaticPaths() {
+  const posts = await getPublishedPosts();
+  const nodes = flattenCategoryTree(buildCategoryTree(posts));
+  return nodes.map((node) => ({
+    params: { path: node.path },
+    props: { node, posts: postsInCategory(posts, node.path), allNodes: nodes },
+  }));
+}
+
+interface Props {
+  node: CategoryNode;
+  posts: Awaited<ReturnType<typeof getPublishedPosts>>;
+  allNodes: CategoryNode[];
+}
+
+const { node, posts, allNodes } = Astro.props;
+const parts = node.path.split('/');
+const ancestors = parts
+  .slice(0, -1)
+  .map((_, index) => allNodes.find((n) => n.path === parts.slice(0, index + 1).join('/')))
+  .filter((n): n is CategoryNode => n !== undefined);
+---
+
+<BaseLayout title={node.name} activeCategory={node.path}>
+  <nav class="breadcrumb" aria-label="카테고리 경로">
+    <a href={withBase('/categories/')}>카테고리</a>
+    {
+      ancestors.map((ancestor) => (
+        <>
+          <span class="sep">›</span>
+          <a href={withBase(`/categories/${ancestor.path}/`)}>{ancestor.name}</a>
+        </>
+      ))
+    }
+  </nav>
+  <h1 class="page-title">{node.name}</h1>
+  <p class="page-subtitle">{node.count}개의 글</p>
+
+  {
+    node.children.length > 0 && (
+      <div class="category-cards">
+        {node.children.map((child) => (
+          <a class="category-card" href={withBase(`/categories/${child.path}/`)}>
+            <strong>{child.name}</strong>
+            <span>{child.count}개의 글</span>
+          </a>
+        ))}
+      </div>
+    )
+  }
+
+  <PostList posts={posts} />
+</BaseLayout>

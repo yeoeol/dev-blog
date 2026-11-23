@@ -1,0 +1,35 @@
+---
+import type { CategoryNode } from '../lib/posts';
+import { withBase } from '../lib/url';
+
+interface Props {
+  nodes: CategoryNode[];
+  activePath?: string;
+}
+
+const { nodes, activePath = '' } = Astro.props;
+const isOpen = (node: CategoryNode) => activePath === node.path || activePath.startsWith(`${node.path}/`);
+---
+
+<ul class="category-tree">
+  {
+    nodes.map((node) => (
+      <li>
+        {node.children.length > 0 ? (
+          <details open={isOpen(node)}>
+            <summary class:list={['category-link', { active: activePath === node.path }]}>
+              <a href={withBase(`/categories/${node.path}/`)}>{node.name}</a>
+              <span class="count">{node.count}</span>
+            </summary>
+            <Astro.self nodes={node.children} activePath={activePath} />
+          </details>
+        ) : (
+          <a class:list={['category-link', 'leaf', { active: activePath === node.path }]} href={withBase(`/categories/${node.path}/`)}>
+            <span>{node.name}</span>
+            <span class="count">{node.count}</span>
+          </a>
+        )}
+      </li>
+    ))
+  }
+</ul>

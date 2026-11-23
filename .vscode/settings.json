@@ -1,0 +1,12 @@
+{
+  // 마크다운 편집 중 이미지를 붙여넣기/드래그하면 글 옆 images/ 폴더에 저장하고 상대경로 링크를 넣는다.
+  "markdown.copyFiles.destination": {
+    "src/content/posts/**/*.md": "images/${documentBaseName}/${fileName}",
+    "src/content/posts/**/*.mdx": "images/${documentBaseName}/${fileName}"
+  },
+  "markdown.editor.drop.enabled": "always",
+  "markdown.editor.filePaste.enabled": "always",
+  "files.associations": {
+    "*.mdx": "markdown"
+  }
+}

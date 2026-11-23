@@ -1,0 +1,41 @@
+---
+import { categoryPath, categorySegments, formatDate, slugify, type Post } from '../lib/posts';
+import { withBase } from '../lib/url';
+
+interface Props {
+  posts: Post[];
+}
+
+const { posts } = Astro.props;
+---
+
+{
+  posts.length === 0 ? (
+    <p class="empty">아직 작성된 글이 없습니다.</p>
+  ) : (
+    <ul class="post-list">
+      {posts.map((post) => (
+        <li class="post-item">
+          <div class="post-meta">
+            <a class="post-category" href={withBase(`/categories/${categoryPath(post.data.category)}/`)}>
+              {categorySegments(post.data.category).join(' › ')}
+            </a>
+            <time datetime={post.data.date.toISOString()}>{formatDate(post.data.date)}</time>
+            {post.data.draft && <span class="draft-badge">DRAFT</span>}
+          </div>
+          <a class="post-title" href={withBase(`/posts/${post.id}/`)}>
+            {post.data.title}
+          </a>
+          {post.data.description && <p class="post-description">{post.data.description}</p>}
+          {post.data.tags.length > 0 && (
+            <div class="tag-list">
+              {post.data.tags.map((tag) => (
+                <a class="tag" href={withBase(`/tags/${slugify(tag)}/`)}>#{tag}</a>
+              ))}
+            </div>
+          )}
+        </li>
+      ))}
+    </ul>
+  )
+}

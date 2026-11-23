@@ -1,0 +1,49 @@
+---
+import type { MarkdownHeading } from 'astro';
+
+interface Props {
+  headings: MarkdownHeading[];
+}
+
+const headings = Astro.props.headings.filter((heading) => heading.depth >= 2 && heading.depth <= 4);
+---
+
+{
+  headings.length > 0 && (
+    <aside class="toc">
+      <nav class="toc-inner" aria-label="목차">
+        <p class="toc-heading">On this page</p>
+        <ul>
+          {headings.map((heading) => (
+            <li class={`depth-${heading.depth}`}>
+              <a href={`#${heading.slug}`} data-toc-slug={heading.slug}>{heading.text}</a>
+            </li>
+          ))}
+        </ul>
+      </nav>
+    </aside>
+  )
+}
+
+<script>
+  const links = new Map<string, HTMLAnchorElement>();
+  document.querySelectorAll<HTMLAnchorElement>('[data-toc-slug]').forEach((link) => {
+    links.set(link.dataset.tocSlug!, link);
+  });
+
+  if (links.size > 0) {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries.filter((entry) => entry.isIntersecting);
+        if (visible.length === 0) return;
+        links.forEach((link) => link.classList.remove('active'));
+        links.get(visible[0].target.id)?.classList.add('active');
+      },
+      { rootMargin: '-80px 0px -70% 0px' },
+    );
+    links.forEach((_, slug) => {
+      const heading = document.getElementById(slug);
+      if (heading) observer.observe(heading);
+    });
+  }
+</script>

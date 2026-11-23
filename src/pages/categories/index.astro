@@ -1,0 +1,42 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { buildCategoryTree, getPublishedPosts, postsInCategory, type CategoryNode } from '../../lib/posts';
+import { withBase } from '../../lib/url';
+
+const posts = await getPublishedPosts();
+const categories = buildCategoryTree(posts);
+
+const flatten = (nodes: CategoryNode[], depth = 0): { node: CategoryNode; depth: number }[] =>
+  nodes.flatMap((node) => [{ node, depth }, ...flatten(node.children, depth + 1)]);
+---
+
+<BaseLayout title="카테고리">
+  <h1 class="page-title">카테고리</h1>
+  <p class="page-subtitle">전체 {posts.length}개의 글</p>
+
+  {
+    categories.map((top) => (
+      <section class="category-section">
+        <h2>
+          <a href={withBase(`/categories/${top.path}/`)}>{top.name}</a>
+          <span class="count">{top.count}</span>
+        </h2>
+        <ul class="category-index">
+          {flatten(top.children).map(({ node, depth }) => (
+            <li style={`--depth:${depth}`}>
+              <a href={withBase(`/categories/${node.path}/`)}>{node.name}</a>
+              <span class="count">{node.count}</span>
+            </li>
+          ))}
+        </ul>
+        <ul class="compact-post-list">
+          {postsInCategory(posts, top.path).map((post) => (
+            <li>
+              <a href={withBase(`/posts/${post.id}/`)}>{post.data.title}</a>
+            </li>
+          ))}
+        </ul>
+      </section>
+    ))
+  }
+</BaseLayout>

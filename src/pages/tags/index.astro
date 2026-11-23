@@ -1,0 +1,21 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { collectTags, getPublishedPosts } from '../../lib/posts';
+import { withBase } from '../../lib/url';
+
+const tags = collectTags(await getPublishedPosts());
+---
+
+<BaseLayout title="태그">
+  <h1 class="page-title">태그</h1>
+  <p class="page-subtitle">{tags.length}개의 태그</p>
+  <div class="tag-cloud">
+    {
+      tags.map((tag) => (
+        <a class="tag" href={withBase(`/tags/${tag.slug}/`)}>
+          #{tag.name} <span class="count">{tag.count}</span>
+        </a>
+      ))
+    }
+  </div>
+</BaseLayout>

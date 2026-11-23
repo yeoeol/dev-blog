@@ -1,0 +1,126 @@
+---
+import 'katex/dist/katex.min.css';
+import 'rehype-callouts/theme/obsidian';
+import { render } from 'astro:content';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import Toc from '../../components/Toc.astro';
+import { categoryPath, categorySegments, formatDate, getPublishedPosts, slugify, type Post } from '../../lib/posts';
+import { withBase } from '../../lib/url';
+
+export async function getStaticPaths() {
+  const posts = await getPublishedPosts();
+  return posts.map((post, index) => ({
+    params: { slug: post.id },
+    props: { post, newer: posts[index - 1], older: posts[index + 1] },
+  }));
+}
+
+interface Props {
+  post: Post;
+  newer?: Post;
+  older?: Post;
+}
+
+const { post, newer, older } = Astro.props;
+const { Content, headings } = await render(post);
+const segments = categorySegments(post.data.category);
+const activeCategory = categoryPath(post.data.category);
+---
+
+<BaseLayout title={post.data.title} description={post.data.description} activeCategory={activeCategory}>
+  <article class="post" data-pagefind-body>
+    <header class="post-header">
+      <nav class="breadcrumb" aria-label="카테고리 경로" data-pagefind-ignore>
+        {
+          segments.map((segment, index) => (
+            <>
+              {index > 0 && <span class="sep">›</span>}
+              <a href={withBase(`/categories/${segments.slice(0, index + 1).map(slugify).join('/')}/`)}>{segment}</a>
+            </>
+          ))
+        }
+      </nav>
+      <h1 data-pagefind-meta="title">{post.data.title}</h1>
+      {post.data.description && <p class="post-lead">{post.data.description}</p>}
+      <div class="post-info" data-pagefind-ignore>
+        <time datetime={post.data.date.toISOString()}>{formatDate(post.data.date)}</time>
+        {
+          post.data.updated && (
+            <span>
+              · 수정 <time datetime={post.data.updated.toISOString()}>{formatDate(post.data.updated)}</time>
+            </span>
+          )
+        }
+        {post.data.draft && <span class="draft-badge">DRAFT</span>}
+      </div>
+      {
+        post.data.tags.length > 0 && (
+          <div class="tag-list" data-pagefind-ignore>
+            {post.data.tags.map((tag) => (
+              <a class="tag" href={withBase(`/tags/${slugify(tag)}/`)}>#{tag}</a>
+            ))}
+          </div>
+        )
+      }
+    </header>
+
+    <div class="prose">
+      <Content />
+    </div>
+  </article>
+
+  <nav class="post-nav" aria-label="이전/다음 글">
+    {
+      older ? (
+        <a class="prev" href={withBase(`/posts/${older.id}/`)}>
+          <span>← 이전 글</span>
+          <strong>{older.data.title}</strong>
+        </a>
+      ) : (
+        <span />
+      )
+    }
+    {
+      newer && (
+        <a class="next" href={withBase(`/posts/${newer.id}/`)}>
+          <span>다음 글 →</span>
+          <strong>{newer.data.title}</strong>
+        </a>
+      )
+    }
+  </nav>
+
+  <Toc slot="aside" headings={headings} />
+</BaseLayout>
+
+<script>
+  // 코드블록이 아닌 mermaid 블록을 다이어그램으로 렌더링 (다크 모드 전환 시 다시 그림)
+  const blocks = document.querySelectorAll<HTMLElement>('pre.mermaid');
+
+  if (blocks.length > 0) {
+    blocks.forEach((block) => (block.dataset.source = block.textContent ?? ''));
+    const { default: mermaid } = await import('mermaid');
+
+    const renderAll = async () => {
+      const dark = document.documentElement.classList.contains('dark');
+      mermaid.initialize({ startOnLoad: false, theme: dark ? 'dark' : 'default', securityLevel: 'strict' });
+      blocks.forEach((block) => {
+        block.removeAttribute('data-processed');
+        block.textContent = block.dataset.source ?? '';
+      });
+      await mermaid.run({ nodes: [...blocks] });
+    };
+
+    await renderAll();
+    document.addEventListener('themechange', renderAll);
+  }
+
+  // 표가 화면보다 넓을 때 가로 스크롤
+  document.querySelectorAll('.prose table').forEach((table) => {
+    if (table.parentElement?.classList.contains('table-wrapper')) return;
+    const wrapper = document.createElement('div');
+    wrapper.className = 'table-wrapper';
+    table.replaceWith(wrapper);
+    wrapper.appendChild(table);
+  });
+</script>
