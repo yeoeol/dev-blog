@@ -4,7 +4,7 @@ description: 테스트 게시글입니다
 category: Test
 tags: [ 테스트, Test ]
 date: 2026-11-23T17:34:00+09:00
-draft: true
+updated: 2026-11-23T17:38:14+09:00
 ---
 
 # 개발 블로그 작성 1일차
