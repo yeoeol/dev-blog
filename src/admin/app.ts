@@ -32,6 +32,7 @@ interface EditingState {
   parsed: ParsedPost | null;
   editor: PostEditor;
   pendingImages: Map<string, PendingImage>;
+  imageRewrites: [string, string][];
   dirty: boolean;
   saving: boolean;
 }
@@ -49,6 +50,7 @@ const remoteImageCache = new Map<string, Promise<string>>();
 // ---------------------------------------------------------------- 공통 UI
 
 function showView(name: 'login' | 'list' | 'editor') {
+  if (name !== 'list') window.clearTimeout(deployPollTimer);
   for (const view of ['login', 'list', 'editor']) {
     $(`#view-${view}`).hidden = view !== name;
   }
@@ -206,7 +208,7 @@ function renderPostList() {
           <div class="admin-post-meta">
             <span class="admin-post-category">${escapeHtml(post.meta.category)}</span>
             <span>${escapeHtml(formatListDate(post.meta.date))}</span>
-            ${post.meta.draft ? '<span class="draft-badge">비공개</span>' : ''}
+            ${post.meta.draft ? '<span class="draft-badge">임시저장</span>' : ''}
             ${post.editable ? '' : '<span class="draft-badge mdx">MDX</span>'}
           </div>
           ${
@@ -234,11 +236,13 @@ async function showList(reload: boolean) {
     await loadPosts();
   }
   renderPostList();
+  refreshDeployStatus();
 }
 
 function setupList() {
   $('#post-filter').addEventListener('input', renderPostList);
   $('#refresh-posts').addEventListener('click', () => showList(true).catch((e) => toast(errorMessage(e), 'error')));
+  $('#deploy-now').addEventListener('click', deployNow);
   $('#post-list').addEventListener('click', async (event) => {
     const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-delete]');
     if (!button) return;
@@ -255,6 +259,72 @@ function setupList() {
   });
 }
 
+// ---------------------------------------------------------------- 배포
+
+const DEPLOY_WORKFLOW = 'deploy.yml';
+const RUNNING_STATUSES = ['queued', 'in_progress', 'waiting', 'pending', 'requested'];
+let deployPollTimer: number | undefined;
+
+const stripSkipCi = (message: string) => message.split('\n')[0].replace(/\s*\[skip ci\]\s*$/, '');
+
+async function refreshDeployStatus() {
+  window.clearTimeout(deployPollTimer);
+  const status = $('#deploy-status');
+  const button = $<HTMLButtonElement>('#deploy-now');
+  const pendingList = $('#deploy-pending');
+  try {
+    const [latest] = await client!.workflowRuns(DEPLOY_WORKFLOW);
+    const [lastSuccess] = await client!.workflowRuns(DEPLOY_WORKFLOW, { status: 'success' });
+    const pending = lastSuccess ? await client!.commitsSince(lastSuccess.head_sha) : null;
+
+    if (latest && RUNNING_STATUSES.includes(latest.status)) {
+      status.innerHTML = `배포 진행 중… <a href="${latest.html_url}" target="_blank" rel="noopener">진행 상황 보기</a>`;
+      button.disabled = true;
+      deployPollTimer = window.setTimeout(refreshDeployStatus, 10_000);
+    } else {
+      const failed = latest?.conclusion && latest.conclusion !== 'success'
+        ? ` · <a href="${latest.html_url}" target="_blank" rel="noopener">마지막 배포 실패</a>`
+        : '';
+      if (pending === null) status.innerHTML = `아직 배포된 적이 없습니다.${failed}`;
+      else if (pending.length === 0) status.innerHTML = `모든 변경 사항이 블로그에 반영되어 있습니다.${failed}`;
+      else status.innerHTML = `배포되지 않은 변경 <b>${pending.length}건</b>${failed}`;
+      button.disabled = pending !== null && pending.length === 0;
+    }
+
+    pendingList.innerHTML = (pending ?? [])
+      .slice()
+      .reverse()
+      .map((commit) => `<li>${escapeHtml(stripSkipCi(commit.message))} <span class="admin-muted">${escapeHtml(new Date(commit.date).toLocaleString('ko-KR'))}</span></li>`)
+      .join('');
+    $('#deploy-pending-wrap').hidden = !pending || pending.length === 0;
+  } catch (error) {
+    status.textContent =
+      error instanceof GitHubError && error.status === 403
+        ? '배포 상태를 볼 수 없습니다. 토큰에 Actions 권한(Read and write)을 추가하세요.'
+        : `배포 상태를 불러오지 못했습니다: ${errorMessage(error)}`;
+    button.disabled = false;
+  }
+}
+
+async function deployNow() {
+  const button = $<HTMLButtonElement>('#deploy-now');
+  button.disabled = true;
+  try {
+    const run = await client!.runWorkflow(DEPLOY_WORKFLOW);
+    toast('배포를 시작했습니다. 1~2분 후 블로그에 반영됩니다.');
+    $('#deploy-status').innerHTML = `배포 진행 중… <a href="${run.html_url}" target="_blank" rel="noopener">진행 상황 보기</a>`;
+    deployPollTimer = window.setTimeout(refreshDeployStatus, 10_000);
+  } catch (error) {
+    button.disabled = false;
+    toast(
+      error instanceof GitHubError && error.status === 403
+        ? '배포 권한이 없습니다. 토큰에 Actions 권한(Read and write)을 추가하세요.'
+        : errorMessage(error),
+      'error',
+    );
+  }
+}
+
 // ---------------------------------------------------------------- 삭제
 
 async function deletePost(path: string, loadedSha: string, title: string): Promise<boolean> {
@@ -267,15 +337,27 @@ async function deletePost(path: string, loadedSha: string, title: string): Promi
   if (currentSha !== loadedSha) throw new Error('다른 곳에서 글이 변경되었습니다. 목록을 새로고침한 뒤 다시 시도하세요.');
 
   const changes: FileChange[] = [path, ...images].map((p) => ({ path: p, content: null }));
-  await client!.commit(changes, `delete: ${title}`);
+  await client!.commit(changes, `delete: ${title} [skip ci]`);
   posts = posts.filter((p) => p.path !== path);
-  toast('삭제했습니다. 1~2분 후 블로그에 반영됩니다.');
+  toast('삭제했습니다. "지금 배포"를 누르면 블로그에 반영됩니다.');
   return true;
 }
 
 // ---------------------------------------------------------------- 에디터
 
-function readForm(): PostMeta {
+const DRAFT_DIR = `${POSTS_DIR}drafts/`;
+
+/** 경로를 정하지 않은 임시저장 글의 자동 경로 */
+function autoDraftPath(): string {
+  const stamp = nowWithOffset().slice(0, 19).replace(/[-:]/g, '').replace('T', '-');
+  return `${DRAFT_DIR}${stamp}.md`;
+}
+
+const isAutoDraftPath = (path: string | null) => path !== null && path.startsWith(DRAFT_DIR);
+/** 발행된 적 있는 글(= 현재 공개 상태로 저장된 글)은 경로를 바꾸지 않는다 */
+const isPublished = () => editing?.parsed?.meta.draft === false;
+
+function readForm(draft: boolean): PostMeta {
   const dateValue = $<HTMLInputElement>('#meta-date').value;
   return {
     title: $<HTMLInputElement>('#meta-title').value.trim(),
@@ -291,7 +373,7 @@ function readForm(): PostMeta {
       .filter(Boolean),
     date: dateValue ? nowWithOffset(new Date(dateValue)) : nowWithOffset(),
     updated: editing?.parsed?.meta.updated ?? '',
-    draft: !$<HTMLInputElement>('#meta-publish').checked,
+    draft,
   };
 }
 
@@ -301,18 +383,21 @@ function fillForm(meta: PostMeta | null, path: string | null) {
   $<HTMLInputElement>('#meta-category').value = meta?.category ?? '';
   $<HTMLInputElement>('#meta-tags').value = meta?.tags.join(', ') ?? '';
   $<HTMLInputElement>('#meta-date').value = toInputDateTime(meta?.date ?? '');
-  $<HTMLInputElement>('#meta-publish').checked = meta ? !meta.draft : false;
 
+  const published = meta?.draft === false;
   const slug = $<HTMLInputElement>('#meta-slug');
-  slug.value = path ? postId(path) : '';
-  slug.disabled = path !== null;
-  $('#meta-slug-hint').textContent = path ? '저장된 글의 경로(URL)는 바뀌지 않습니다.' : '영문 소문자, 숫자, -, / 만 사용. 예: spring/jpa-n-plus-1';
-  $('#delete-post').hidden = path === null;
-  updatePublishLabel();
-}
+  slug.value = path && !isAutoDraftPath(path) ? postId(path) : '';
+  slug.disabled = published;
+  $('#meta-slug-hint').textContent = published
+    ? '발행된 글의 경로(URL)는 바뀌지 않습니다.'
+    : '발행 전까지 비워 둘 수 있습니다. 영문 소문자, 숫자, -, / 만 사용. 예: spring/jpa-n-plus-1';
 
-function updatePublishLabel() {
-  $('#publish-label').textContent = $<HTMLInputElement>('#meta-publish').checked ? '공개' : '비공개';
+  $('#post-state').textContent = path === null ? '새 글' : published ? '발행된 글' : '임시저장 글';
+  $('#post-state').dataset.state = path === null ? 'new' : published ? 'published' : 'draft';
+  $('#save-draft').hidden = published;
+  $('#unpublish-post').hidden = !published;
+  $('#publish-post').textContent = published ? '저장' : '발행';
+  $('#delete-post').hidden = path === null;
 }
 
 function setDirty(dirty: boolean) {
@@ -345,6 +430,29 @@ function sanitizeFileName(name: string): string {
   return `${stem || 'image'}-${Date.now().toString(36)}${ext}`;
 }
 
+/** 새 글 화면에서 이어 쓸 수 있는 임시저장 목록 */
+async function renderDraftPanel(show: boolean) {
+  const panel = $('#draft-panel');
+  panel.hidden = true;
+  if (!show) return;
+  if (posts.length === 0) await loadPosts();
+  const drafts = posts.filter((post) => post.meta.draft && post.editable);
+  if (drafts.length === 0) return;
+  $('#draft-panel-count').textContent = `${drafts.length}개`;
+  $('#draft-list').innerHTML = drafts
+    .map(
+      (post) => `
+      <li>
+        <a href="#edit=${encodeURIComponent(post.path)}">
+          <strong>${escapeHtml(post.meta.title || '(제목 없음)')}</strong>
+          <span class="admin-muted">${escapeHtml(post.meta.category)} · ${escapeHtml(formatListDate(post.meta.updated || post.meta.date))}</span>
+        </a>
+      </li>`,
+    )
+    .join('');
+  panel.hidden = false;
+}
+
 async function openEditor(path: string | null) {
   await closeEditor();
   showView('editor');
@@ -360,8 +468,10 @@ async function openEditor(path: string | null) {
     $('#editor-root').innerHTML = '';
   }
   fillForm(parsed?.meta ?? null, path);
+  await renderDraftPanel(path === null);
 
   const pendingImages = new Map<string, PendingImage>();
+  const imageRewrites: [string, string][] = [];
   const editor = await createPostEditor({
     root: $('#editor-root'),
     markdown: parsed?.body.trim() ?? '',
@@ -373,12 +483,17 @@ async function openEditor(path: string | null) {
       return token;
     },
     // 에디터 생성 중에도 호출되므로 editing 상태 대신 지역 변수를 넘긴다
-    resolveImage: (src) => resolveImage(src, editing?.path ?? path, pendingImages),
+    resolveImage: (src) => resolveImage(applyRewrites(src, imageRewrites), editing?.path ?? path, pendingImages),
   });
 
-  editing = { path, sha, parsed, editor, pendingImages, dirty: false, saving: false };
+  editing = { path, sha, parsed, editor, pendingImages, imageRewrites, dirty: false, saving: false };
   setDirty(false);
   if (!path) $('#meta-title').focus();
+}
+
+/** 글 경로가 바뀐 뒤에도 에디터 안의 예전 이미지 경로를 새 경로로 바꿔 준다 */
+function applyRewrites(text: string, rewrites: [string, string][]): string {
+  return rewrites.reduce((result, [from, to]) => result.split(from).join(to), text);
 }
 
 function resolveImage(src: string, postPath: string | null, pendingImages: Map<string, PendingImage>): Promise<string> | string {
@@ -407,80 +522,127 @@ function resolveImage(src: string, postPath: string | null, pendingImages: Map<s
   return remoteImageCache.get(repoPath)!.catch(() => src);
 }
 
-async function savePost() {
-  if (!editing || editing.saving) return;
-  const meta = readForm();
-  if (!meta.title) return toast('제목을 입력하세요.', 'error');
-  if (!meta.category) return toast('카테고리를 입력하세요.', 'error');
+type SaveMode = 'draft' | 'publish' | 'unpublish';
 
-  let path = editing.path;
-  if (!path) {
-    const slug = $<HTMLInputElement>('#meta-slug').value.trim();
+const SAVE_BUTTONS = ['#save-draft', '#publish-post', '#unpublish-post', '#delete-post'];
+
+async function savePost(mode: SaveMode) {
+  if (!editing || editing.saving) return;
+  const draft = mode !== 'publish';
+  const meta = readForm(draft);
+  if (!meta.title) return toast('제목을 입력하세요.', 'error');
+  if (!draft && !meta.category) return toast('발행하려면 카테고리를 입력하세요.', 'error');
+  if (draft && !meta.category) meta.category = '미분류';
+
+  // 저장할 경로 결정: 발행 전 글만 경로를 바꿀 수 있다
+  const slug = $<HTMLInputElement>('#meta-slug').value.trim();
+  let path: string;
+  if (isPublished()) {
+    path = editing.path!;
+  } else if (slug) {
     if (!SLUG_PATTERN.test(slug)) return toast('파일 경로는 영문 소문자, 숫자, -, / 만 사용할 수 있습니다.', 'error');
+    if (`${POSTS_DIR}${slug}.md`.startsWith(DRAFT_DIR)) return toast('drafts/ 는 임시저장용 경로입니다. 다른 경로를 입력하세요.', 'error');
     path = `${POSTS_DIR}${slug}.md`;
+  } else if (!draft) {
+    $<HTMLInputElement>('#meta-slug').focus();
+    return toast('발행하려면 파일 경로(URL)를 입력하세요.', 'error');
+  } else {
+    path = editing.path ?? autoDraftPath();
   }
+  const previousPath = editing.path;
+  const moving = previousPath !== null && previousPath !== path;
 
   editing.saving = true;
-  $<HTMLButtonElement>('#save-post').disabled = true;
+  SAVE_BUTTONS.forEach((selector) => ($<HTMLButtonElement>(selector).disabled = true));
   $('#save-status').textContent = '저장 중…';
   try {
-    const currentSha = await client!.fileSha(path);
-    if (editing.path === null && currentSha !== null) throw new Error('같은 경로의 글이 이미 있습니다. 다른 경로를 입력하세요.');
-    if (editing.path !== null && currentSha !== editing.sha) {
-      throw new Error('다른 곳에서 이 글이 수정되었습니다. 내용을 복사해 두고 글을 다시 열어 주세요.');
+    if (previousPath !== null) {
+      const currentSha = await client!.fileSha(previousPath);
+      if (currentSha !== editing.sha) {
+        throw new Error('다른 곳에서 이 글이 수정되었습니다. 내용을 복사해 두고 글을 다시 열어 주세요.');
+      }
+    }
+    if (previousPath === null || moving) {
+      if ((await client!.fileSha(path)) !== null) throw new Error('같은 경로의 글이 이미 있습니다. 다른 경로를 입력하세요.');
     }
 
-    // 공개된 글을 수정하면 수정일 기록
-    if (editing.path !== null && !meta.draft) meta.updated = nowWithOffset();
+    // 발행된 글을 다시 저장하면 수정일 기록
+    if (isPublished() && mode === 'publish') meta.updated = nowWithOffset();
 
-    const imageDir = `./images/${baseNameOf(path)}/`;
-    let body = editing.editor.getMarkdown();
     const changes: FileChange[] = [];
+    const newImageDir = `./images/${baseNameOf(path)}/`;
+
+    // 경로 변경: 글 파일과 이미지 폴더를 새 경로로 옮긴다 (이미지는 재업로드 없이 기존 내용 재사용)
+    if (moving) {
+      const oldImageDir = `./images/${baseNameOf(previousPath)}/`;
+      const oldImageRepoDir = `${dirOf(previousPath)}/${oldImageDir.slice(2)}`;
+      const newImageRepoDir = `${dirOf(path)}/${newImageDir.slice(2)}`;
+      for (const file of await client!.listFiles(oldImageRepoDir)) {
+        changes.push({ path: `${newImageRepoDir}${file.path.slice(oldImageRepoDir.length)}`, content: { sha: file.sha } });
+        changes.push({ path: file.path, content: null });
+      }
+      changes.push({ path: previousPath, content: null });
+      if (oldImageDir !== newImageDir) editing.imageRewrites.push([oldImageDir, newImageDir]);
+    }
+
+    let body = applyRewrites(editing.editor.getMarkdown(), editing.imageRewrites);
+    const uploadedImages: PendingImage[] = [];
     for (const [token, image] of editing.pendingImages) {
       if (!body.includes(token)) continue;
-      body = body.split(token).join(token.replace(PENDING_IMAGE_DIR, imageDir));
+      const finalPath = token.replace(PENDING_IMAGE_DIR, newImageDir);
+      body = body.split(token).join(finalPath);
       if (!image.committed) {
-        changes.push({
-          path: `${dirOf(path)}/${token.replace(PENDING_IMAGE_DIR, imageDir).slice(2)}`,
-          content: { base64: await fileToBase64(image.file) },
-        });
+        changes.push({ path: `${dirOf(path)}/${finalPath.slice(2)}`, content: { base64: await fileToBase64(image.file) } });
+        uploadedImages.push(image);
       }
     }
 
     const content = serializePost(meta, body, editing.parsed?.document);
     changes.unshift({ path, content: { base64: textToBase64(content) } });
-    await client!.commit(changes, `${editing.path ? 'update' : 'post'}: ${meta.title}`);
+    const action = { draft: 'draft', publish: isPublished() ? 'update' : 'post', unpublish: 'unpublish' }[mode];
+    // [skip ci]: 저장할 때마다 배포하지 않고, 목록 화면의 "지금 배포" 로 한 번에 반영
+    await client!.commit(changes, `${action}: ${meta.title} [skip ci]`);
 
-    editing.pendingImages.forEach((image) => (image.committed = true));
+    // 업로드한 이미지는 이후 저장에서 다시 올리지 않는다
+    uploadedImages.forEach((image) => (image.committed = true));
     editing.sha = await client!.fileSha(path);
     editing.parsed = parsePost(content);
-    const isNew = editing.path === null;
     editing.path = path;
     fillForm(editing.parsed.meta, path);
     setDirty(false);
 
-    const summary: PostSummary = { path, sha: editing.sha!, meta: editing.parsed.meta, editable: true };
-    posts = [summary, ...posts.filter((p) => p.path !== path)].sort(
-      (a, b) => new Date(b.meta.date).getTime() - new Date(a.meta.date).getTime(),
-    );
+    posts = [
+      { path, sha: editing.sha!, meta: editing.parsed.meta, editable: true },
+      ...posts.filter((p) => p.path !== path && p.path !== previousPath),
+    ].sort((a, b) => new Date(b.meta.date).getTime() - new Date(a.meta.date).getTime());
     updateCategorySuggestions();
-    if (isNew) {
+    if (previousPath !== path) {
       history.replaceState(null, '', `#edit=${encodeURIComponent(path)}`);
       currentHash = location.hash;
+      $('#draft-panel').hidden = true;
     }
-    toast(meta.draft ? '저장했습니다. (비공개)' : '저장했습니다. 1~2분 후 블로그에 반영됩니다.');
+    toast(
+      {
+        draft: '임시저장했습니다.',
+        publish: '저장했습니다. 목록 화면에서 "지금 배포"를 누르면 블로그에 반영됩니다.',
+        unpublish: '발행을 취소하고 임시저장 글로 바꿨습니다. 배포하면 블로그에서 내려갑니다.',
+      }[mode],
+    );
   } catch (error) {
     $('#save-status').textContent = '저장 실패';
     toast(errorMessage(error), 'error');
   } finally {
     if (editing) editing.saving = false;
-    $<HTMLButtonElement>('#save-post').disabled = false;
+    SAVE_BUTTONS.forEach((selector) => ($<HTMLButtonElement>(selector).disabled = false));
   }
 }
 
 function setupEditor() {
-  $('#save-post').addEventListener('click', savePost);
-  $('#meta-publish').addEventListener('change', updatePublishLabel);
+  $('#save-draft').addEventListener('click', () => savePost('draft'));
+  $('#publish-post').addEventListener('click', () => savePost('publish'));
+  $('#unpublish-post').addEventListener('click', () => {
+    if (confirm('발행을 취소하고 임시저장 글로 바꿀까요?\n배포하면 블로그에서 이 글이 내려갑니다.')) savePost('unpublish');
+  });
   $('#view-editor .admin-meta').addEventListener('input', () => setDirty(true));
   $('#delete-post').addEventListener('click', async () => {
     if (!editing?.path || !editing.sha) return;
@@ -497,7 +659,8 @@ function setupEditor() {
   window.addEventListener('keydown', (event) => {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's' && editing) {
       event.preventDefault();
-      savePost();
+      // 발행된 글은 저장, 그 외에는 임시저장
+      savePost(isPublished() ? 'publish' : 'draft');
     }
   });
   window.addEventListener('beforeunload', (event) => {

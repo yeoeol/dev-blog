@@ -74,7 +74,7 @@ const defaultBranch = ADMIN_BRANCH || process.env.GITHUB_REF_NAME || 'main';
               에서 <b>Generate new token</b>
             </li>
             <li><b>Repository access</b>: Only select repositories → 블로그 리포지토리 하나만 선택</li>
-            <li><b>Permissions</b> → Repository permissions → <b>Contents: Read and write</b></li>
+            <li><b>Permissions</b> → Repository permissions → <b>Contents: Read and write</b>, <b>Actions: Read and write</b> (배포 버튼용)</li>
             <li>생성된 토큰(<code>github_pat_...</code>)을 위에 붙여넣기</li>
           </ol>
           <p>토큰은 이 브라우저에만 저장되며, 이 블로그 리포지토리 외에는 접근할 수 없습니다. 공용 PC 에서는 "로그인 유지"를 끄세요.</p>
@@ -87,6 +87,16 @@ const defaultBranch = ADMIN_BRANCH || process.env.GITHUB_REF_NAME || 'main';
           <h1 class="page-title">글 관리</h1>
           <a class="btn primary" href="#new">+ 새 글</a>
         </div>
+        <section class="deploy-panel">
+          <div class="deploy-row">
+            <span id="deploy-status" class="deploy-status">배포 상태 확인 중…</span>
+            <button id="deploy-now" class="btn primary" type="button">지금 배포</button>
+          </div>
+          <details id="deploy-pending-wrap" hidden>
+            <summary>배포될 변경 내역</summary>
+            <ul id="deploy-pending"></ul>
+          </details>
+        </section>
         <div class="admin-toolbar">
           <input id="post-filter" class="admin-search" type="search" placeholder="제목, 카테고리, 태그로 찾기" />
           <span id="post-count" class="admin-muted"></span>
@@ -99,17 +109,20 @@ const defaultBranch = ADMIN_BRANCH || process.env.GITHUB_REF_NAME || 'main';
       <section id="view-editor" class="admin-container" hidden>
         <div class="admin-editor-bar">
           <a class="btn" href="#">← 목록</a>
+          <span id="post-state" class="post-state"></span>
           <span id="save-status" class="admin-muted"></span>
           <div class="admin-editor-actions">
-            <label class="switch">
-              <input id="meta-publish" type="checkbox" />
-              <span class="switch-track"></span>
-              <span id="publish-label">비공개</span>
-            </label>
             <button id="delete-post" class="btn danger" type="button">삭제</button>
-            <button id="save-post" class="btn primary" type="button" title="Ctrl+S">저장</button>
+            <button id="unpublish-post" class="btn" type="button">발행 취소</button>
+            <button id="save-draft" class="btn" type="button" title="Ctrl+S">임시저장</button>
+            <button id="publish-post" class="btn primary" type="button">발행</button>
           </div>
         </div>
+
+        <details id="draft-panel" class="draft-panel" open hidden>
+          <summary>임시저장된 글 <span id="draft-panel-count" class="admin-muted"></span></summary>
+          <ul id="draft-list" class="draft-list"></ul>
+        </details>
 
         <div class="admin-meta">
           <input id="meta-title" class="admin-title-input" placeholder="제목 없음" autocomplete="off" />

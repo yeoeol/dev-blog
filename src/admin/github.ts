@@ -17,10 +17,24 @@ export interface RepoFile {
   sha: string;
 }
 
-/** content 가 null 이면 삭제 */
+/** content: base64 = 새 내용, sha = 이미 저장소에 있는 파일 내용 재사용(이동), null = 삭제 */
 export interface FileChange {
   path: string;
-  content: { base64: string } | null;
+  content: { base64: string } | { sha: string } | null;
+}
+
+export interface WorkflowRun {
+  status: string;
+  conclusion: string | null;
+  head_sha: string;
+  html_url: string;
+  created_at: string;
+  event: string;
+}
+
+export interface PendingCommit {
+  message: string;
+  date: string;
 }
 
 export class GitHubClient {
@@ -104,6 +118,9 @@ export class GitHubClient {
         if (change.content === null) {
           return { path: change.path, mode: '100644', type: 'blob', sha: null };
         }
+        if ('sha' in change.content) {
+          return { path: change.path, mode: '100644', type: 'blob', sha: change.content.sha };
+        }
         const blob = await this.request<{ sha: string }>(`/repos/${this.repo}/git/blobs`, {
           method: 'POST',
           body: JSON.stringify({ content: change.content.base64, encoding: 'base64' }),
@@ -125,6 +142,31 @@ export class GitHubClient {
       method: 'PATCH',
       body: JSON.stringify({ sha: newCommit.sha, force: false }),
     });
+  }
+
+  /** 워크플로 실행 (Actions: write 권한 필요) */
+  async runWorkflow(workflowFile: string): Promise<{ html_url: string }> {
+    return this.request<{ html_url: string }>(`/repos/${this.repo}/actions/workflows/${workflowFile}/dispatches`, {
+      method: 'POST',
+      body: JSON.stringify({ ref: this.branch, return_run_details: true }),
+    });
+  }
+
+  async workflowRuns(workflowFile: string, options: { status?: string; perPage?: number } = {}): Promise<WorkflowRun[]> {
+    const query = new URLSearchParams({ branch: this.branch, per_page: String(options.perPage ?? 1) });
+    if (options.status) query.set('status', options.status);
+    const result = await this.request<{ workflow_runs: WorkflowRun[] }>(
+      `/repos/${this.repo}/actions/workflows/${workflowFile}/runs?${query}`,
+    );
+    return result.workflow_runs;
+  }
+
+  /** base 커밋 이후 브랜치에 쌓인 커밋 */
+  async commitsSince(baseSha: string): Promise<PendingCommit[]> {
+    const result = await this.request<{ commits: { commit: { message: string; committer: { date: string } } }[] }>(
+      `/repos/${this.repo}/compare/${baseSha}...${encodeURIComponent(this.branch)}`,
+    );
+    return result.commits.map((c) => ({ message: c.commit.message, date: c.commit.committer.date }));
   }
 }
 

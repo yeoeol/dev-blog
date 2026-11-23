@@ -40,10 +40,10 @@ export function preserveBlogMarkdown(editor: Editor): void {
     // 목록 기호 '-', 구분선 '---' 로 기존 작성 스타일 유지
     ctx.update(remarkStringifyOptionsCtx, (prev) => ({
       ...prev,
-      bullet: '-',
-      rule: '-',
-      emphasis: '*',
-      strong: '*',
+      bullet: '-' as const,
+      rule: '-' as const,
+      emphasis: '*' as const,
+      strong: '*' as const,
     }));
 
     // 이미지 alt(대체 텍스트) 보존. Crepe 기본값은 alt 자리에 크기 비율을 저장한다.
