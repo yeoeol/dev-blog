@@ -172,6 +172,26 @@
   font-size: 0.925rem;
 }
 
+.deploy-row + .deploy-row {
+  margin-top: 10px;
+}
+
+.deploy-row[hidden] {
+  display: none;
+}
+
+.admin-container input.deploy-title {
+  flex: 1;
+}
+
+#deploy-result {
+  margin: 8px 0 0;
+}
+
+#deploy-result:empty {
+  display: none;
+}
+
 .deploy-panel details {
   margin-top: 8px;
   font-size: 0.875rem;

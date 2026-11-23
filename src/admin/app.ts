@@ -1,10 +1,12 @@
-import { GitHubClient, GitHubError, fileToBase64, textToBase64, type FileChange } from './github';
+import { GitHubClient, GitHubError, fileToBase64, textToBase64, type BranchCommit, type FileChange } from './github';
 import { nowWithOffset, parsePost, serializePost, type ParsedPost, type PostMeta } from './frontmatter';
 import { createPostEditor, type PostEditor } from './editor';
 
 const POSTS_DIR = 'src/content/posts/';
 const AUTH_KEY = 'blog-admin-auth';
 const PENDING_IMAGE_DIR = './images/__pending__/';
+/** 관리자 화면의 저장이 쌓이는 작업 브랜치 */
+const WORK_BRANCH = 'writing';
 const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]*(\/[a-z0-9][a-z0-9-]*)*$/;
 
 interface Auth {
@@ -43,6 +45,8 @@ const root = $('#admin');
 const siteBase = root.dataset.siteBase!.replace(/\/+$/, '');
 
 let client: GitHubClient | null = null;
+/** 블로그가 배포되는 브랜치 (로그인 화면의 '배포 브랜치') */
+let deployBranch = 'main';
 let posts: PostSummary[] = [];
 let editing: EditingState | null = null;
 const remoteImageCache = new Map<string, Promise<string>>();
@@ -50,7 +54,6 @@ const remoteImageCache = new Map<string, Promise<string>>();
 // ---------------------------------------------------------------- 공통 UI
 
 function showView(name: 'login' | 'list' | 'editor') {
-  if (name !== 'list') window.clearTimeout(deployPollTimer);
   for (const view of ['login', 'list', 'editor']) {
     $(`#view-${view}`).hidden = view !== name;
   }
@@ -114,9 +117,11 @@ function clearAuth() {
 }
 
 async function login(auth: Auth, remember: boolean | null) {
-  const candidate = new GitHubClient(auth.token, auth.repo, auth.branch);
+  const candidate = new GitHubClient(auth.token, auth.repo, WORK_BRANCH);
   const user = await candidate.verify();
   client = candidate;
+  deployBranch = auth.branch;
+  await prepareWorkBranch();
   if (remember !== null) {
     clearAuth();
     (remember ? localStorage : sessionStorage).setItem(AUTH_KEY, JSON.stringify(auth));
@@ -233,6 +238,7 @@ async function showList(reload: boolean) {
   showView('list');
   if (reload || posts.length === 0) {
     $('#post-list').innerHTML = '<li class="admin-empty">불러오는 중…</li>';
+    if (reload) await syncWorkBranch();
     await loadPosts();
   }
   renderPostList();
@@ -243,6 +249,9 @@ function setupList() {
   $('#post-filter').addEventListener('input', renderPostList);
   $('#refresh-posts').addEventListener('click', () => showList(true).catch((e) => toast(errorMessage(e), 'error')));
   $('#deploy-now').addEventListener('click', deployNow);
+  $('#deploy-title').addEventListener('input', (event) => {
+    (event.target as HTMLInputElement).dataset.edited = 'true';
+  });
   $('#post-list').addEventListener('click', async (event) => {
     const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-delete]');
     if (!button) return;
@@ -259,69 +268,130 @@ function setupList() {
   });
 }
 
-// ---------------------------------------------------------------- 배포
+// ---------------------------------------------------------------- 배포 (writing → main squash 병합)
 
-const DEPLOY_WORKFLOW = 'deploy.yml';
-const RUNNING_STATUSES = ['queued', 'in_progress', 'waiting', 'pending', 'requested'];
-let deployPollTimer: number | undefined;
+/**
+ * 관리자 화면의 저장은 모두 작업 브랜치(writing)에 커밋된다.
+ * "main 에 반영" 을 누르면 PR 을 만들어 squash 병합 → main 에는 커밋 1개만 남고, 그 push 로 배포가 1번 돈다.
+ * 저장 단위의 세부 커밋 기록은 병합된 PR 에 남는다.
+ */
+async function prepareWorkBranch() {
+  if ((await client!.branchSha(WORK_BRANCH)) === null) {
+    const deploySha = await client!.branchSha(deployBranch);
+    if (deploySha === null) throw new Error(`배포 브랜치 '${deployBranch}' 를 찾을 수 없습니다.`);
+    await client!.createBranch(WORK_BRANCH, deploySha);
+    return;
+  }
+  await syncWorkBranch();
+}
 
-const stripSkipCi = (message: string) => message.split('\n')[0].replace(/\s*\[skip ci\]\s*$/, '');
-
-async function refreshDeployStatus() {
-  window.clearTimeout(deployPollTimer);
-  const status = $('#deploy-status');
-  const button = $<HTMLButtonElement>('#deploy-now');
-  const pendingList = $('#deploy-pending');
+/** 로컬에서 main 에 직접 push 한 변경을 작업 브랜치로 가져온다 */
+async function syncWorkBranch() {
+  const { aheadBy, behindBy } = await client!.compare(deployBranch, WORK_BRANCH);
+  if (behindBy === 0) return;
+  if (aheadBy === 0) {
+    await client!.moveBranch(WORK_BRANCH, (await client!.branchSha(deployBranch))!, false);
+    return;
+  }
   try {
-    const [latest] = await client!.workflowRuns(DEPLOY_WORKFLOW);
-    const [lastSuccess] = await client!.workflowRuns(DEPLOY_WORKFLOW, { status: 'success' });
-    const pending = lastSuccess ? await client!.commitsSince(lastSuccess.head_sha) : null;
-
-    if (latest && RUNNING_STATUSES.includes(latest.status)) {
-      status.innerHTML = `배포 진행 중… <a href="${latest.html_url}" target="_blank" rel="noopener">진행 상황 보기</a>`;
-      button.disabled = true;
-      deployPollTimer = window.setTimeout(refreshDeployStatus, 10_000);
-    } else {
-      const failed = latest?.conclusion && latest.conclusion !== 'success'
-        ? ` · <a href="${latest.html_url}" target="_blank" rel="noopener">마지막 배포 실패</a>`
-        : '';
-      if (pending === null) status.innerHTML = `아직 배포된 적이 없습니다.${failed}`;
-      else if (pending.length === 0) status.innerHTML = `모든 변경 사항이 블로그에 반영되어 있습니다.${failed}`;
-      else status.innerHTML = `배포되지 않은 변경 <b>${pending.length}건</b>${failed}`;
-      button.disabled = pending !== null && pending.length === 0;
-    }
-
-    pendingList.innerHTML = (pending ?? [])
-      .slice()
-      .reverse()
-      .map((commit) => `<li>${escapeHtml(stripSkipCi(commit.message))} <span class="admin-muted">${escapeHtml(new Date(commit.date).toLocaleString('ko-KR'))}</span></li>`)
-      .join('');
-    $('#deploy-pending-wrap').hidden = !pending || pending.length === 0;
+    await client!.mergeBranch(WORK_BRANCH, deployBranch, `Merge ${deployBranch} into ${WORK_BRANCH}`);
   } catch (error) {
-    status.textContent =
-      error instanceof GitHubError && error.status === 403
-        ? '배포 상태를 볼 수 없습니다. 토큰에 Actions 권한(Read and write)을 추가하세요.'
-        : `배포 상태를 불러오지 못했습니다: ${errorMessage(error)}`;
-    button.disabled = false;
+    if (error instanceof GitHubError && error.status === 409) {
+      throw new Error(
+        `${deployBranch} 와 ${WORK_BRANCH} 에서 같은 파일이 서로 다르게 수정되어 자동으로 합치지 못했습니다. 로컬에서 ${WORK_BRANCH} 브랜치에 ${deployBranch} 를 병합해 충돌을 해결해 주세요.`,
+      );
+    }
+    throw error;
   }
 }
 
+const firstLine = (message: string) => message.split('\n')[0];
+
+/** main 동기화용 병합 커밋을 뺀, 글 작업 커밋만 */
+async function pendingCommits(): Promise<BranchCommit[]> {
+  const { commits } = await client!.compare(deployBranch, WORK_BRANCH);
+  return commits.filter((commit) => !commit.isMerge);
+}
+
+/** "post: 제목", "update: 제목" 형태의 커밋들에서 글 제목을 모아 기본 커밋 메시지를 만든다 */
+function defaultSquashTitle(commits: BranchCommit[]): string {
+  const titles = [...new Set(commits.map((c) => firstLine(c.message).replace(/^\w+:\s*/, '')))].reverse();
+  const shown = titles.slice(0, 3).join(', ');
+  return `글 업데이트: ${shown}${titles.length > 3 ? ` 외 ${titles.length - 3}개` : ''}`;
+}
+
+async function refreshDeployStatus() {
+  const status = $('#deploy-status');
+  const button = $<HTMLButtonElement>('#deploy-now');
+  try {
+    const commits = await pendingCommits();
+    status.innerHTML = commits.length
+      ? `${escapeHtml(deployBranch)} 에 반영되지 않은 커밋 <b>${commits.length}개</b>`
+      : `모든 변경 사항이 ${escapeHtml(deployBranch)} 에 반영되어 있습니다.`;
+    button.disabled = commits.length === 0;
+    // 직접 입력한 커밋 메시지는 덮어쓰지 않는다
+    const titleInput = $<HTMLInputElement>('#deploy-title');
+    if (!titleInput.dataset.edited) titleInput.value = commits.length ? defaultSquashTitle(commits) : '';
+    $('#deploy-form').hidden = commits.length === 0;
+    $('#deploy-pending').innerHTML = commits
+      .slice()
+      .reverse()
+      .map((c) => `<li>${escapeHtml(firstLine(c.message))} <span class="admin-muted">${escapeHtml(new Date(c.date).toLocaleString('ko-KR'))}</span></li>`)
+      .join('');
+  } catch (error) {
+    status.textContent = `반영 상태를 불러오지 못했습니다: ${errorMessage(error)}`;
+  }
+}
+
+async function waitUntilMergeable(number: number): Promise<boolean> {
+  // mergeable 이 null 이면 GitHub 가 아직 계산 중 → 잠시 후 다시 조회
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const pull = await client!.getPullRequest(number);
+    if (pull.mergeable !== null) return pull.mergeable;
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+  }
+  throw new Error('GitHub 가 병합 가능 여부를 아직 계산 중입니다. 잠시 후 다시 시도하세요.');
+}
+
 async function deployNow() {
+  const title = $<HTMLInputElement>('#deploy-title').value.trim();
+  if (!title) return toast('main 에 남길 커밋 메시지를 입력하세요.', 'error');
+
   const button = $<HTMLButtonElement>('#deploy-now');
   button.disabled = true;
+  $('#deploy-status').textContent = `${deployBranch} 에 squash 병합 중…`;
   try {
-    const run = await client!.runWorkflow(DEPLOY_WORKFLOW);
-    toast('배포를 시작했습니다. 1~2분 후 블로그에 반영됩니다.');
-    $('#deploy-status').innerHTML = `배포 진행 중… <a href="${run.html_url}" target="_blank" rel="noopener">진행 상황 보기</a>`;
-    deployPollTimer = window.setTimeout(refreshDeployStatus, 10_000);
+    await syncWorkBranch();
+    const commits = await pendingCommits();
+    if (commits.length === 0) {
+      toast('반영할 변경 사항이 없습니다.');
+      return;
+    }
+    const body = commits.map((c) => `- ${firstLine(c.message)}`).join('\n');
+
+    const pull =
+      (await client!.findOpenPullRequest(WORK_BRANCH, deployBranch)) ??
+      (await client!.createPullRequest(WORK_BRANCH, deployBranch, title, `관리자 화면에서 작성한 변경 사항\n\n${body}`));
+    if (!(await waitUntilMergeable(pull.number))) {
+      throw new Error(`자동으로 병합할 수 없습니다(충돌). PR 에서 확인하세요: ${pull.html_url}`);
+    }
+    const { head } = await client!.getPullRequest(pull.number);
+    const mergeSha = await client!.squashMerge(pull.number, head.sha, title, body);
+
+    // 작업 브랜치를 main 과 같은 지점으로 되돌린다 (세부 커밋 기록은 병합된 PR 에 남아 있음)
+    if ((await client!.branchSha(WORK_BRANCH)) === head.sha) {
+      await client!.moveBranch(WORK_BRANCH, mergeSha, true);
+    }
+
+    delete $('#deploy-title').dataset.edited;
+    toast(`${deployBranch} 에 커밋 1개로 반영했습니다. 1~2분 후 블로그에 반영됩니다.`);
+    $('#deploy-result').innerHTML =
+      `마지막 반영: <a href="${pull.html_url}" target="_blank" rel="noopener">PR #${pull.number}</a> · ` +
+      `<a href="https://github.com/${client!.repo}/actions" target="_blank" rel="noopener">배포 진행 상황</a>`;
   } catch (error) {
-    button.disabled = false;
-    toast(
-      error instanceof GitHubError && error.status === 403
-        ? '배포 권한이 없습니다. 토큰에 Actions 권한(Read and write)을 추가하세요.'
-        : errorMessage(error),
-      'error',
-    );
+    toast(errorMessage(error), 'error');
+  } finally {
+    await refreshDeployStatus();
   }
 }
 
@@ -337,9 +407,9 @@ async function deletePost(path: string, loadedSha: string, title: string): Promi
   if (currentSha !== loadedSha) throw new Error('다른 곳에서 글이 변경되었습니다. 목록을 새로고침한 뒤 다시 시도하세요.');
 
   const changes: FileChange[] = [path, ...images].map((p) => ({ path: p, content: null }));
-  await client!.commit(changes, `delete: ${title} [skip ci]`);
+  await client!.commit(changes, `delete: ${title}`);
   posts = posts.filter((p) => p.path !== path);
-  toast('삭제했습니다. "지금 배포"를 누르면 블로그에 반영됩니다.');
+  toast('삭제했습니다. 목록 화면에서 main 에 반영하면 블로그에서도 지워집니다.');
   return true;
 }
 
@@ -600,8 +670,8 @@ async function savePost(mode: SaveMode) {
     const content = serializePost(meta, body, editing.parsed?.document);
     changes.unshift({ path, content: { base64: textToBase64(content) } });
     const action = { draft: 'draft', publish: isPublished() ? 'update' : 'post', unpublish: 'unpublish' }[mode];
-    // [skip ci]: 저장할 때마다 배포하지 않고, 목록 화면의 "지금 배포" 로 한 번에 반영
-    await client!.commit(changes, `${action}: ${meta.title} [skip ci]`);
+    // 작업 브랜치(writing)에 커밋 → 목록 화면의 "main 에 반영" 으로 한 번에 squash 병합
+    await client!.commit(changes, `${action}: ${meta.title}`);
 
     // 업로드한 이미지는 이후 저장에서 다시 올리지 않는다
     uploadedImages.forEach((image) => (image.committed = true));
@@ -624,8 +694,8 @@ async function savePost(mode: SaveMode) {
     toast(
       {
         draft: '임시저장했습니다.',
-        publish: '저장했습니다. 목록 화면에서 "지금 배포"를 누르면 블로그에 반영됩니다.',
-        unpublish: '발행을 취소하고 임시저장 글로 바꿨습니다. 배포하면 블로그에서 내려갑니다.',
+        publish: '저장했습니다. 목록 화면에서 main 에 반영하면 블로그에 올라갑니다.',
+        unpublish: '발행을 취소하고 임시저장 글로 바꿨습니다. main 에 반영하면 블로그에서 내려갑니다.',
       }[mode],
     );
   } catch (error) {
@@ -641,7 +711,7 @@ function setupEditor() {
   $('#save-draft').addEventListener('click', () => savePost('draft'));
   $('#publish-post').addEventListener('click', () => savePost('publish'));
   $('#unpublish-post').addEventListener('click', () => {
-    if (confirm('발행을 취소하고 임시저장 글로 바꿀까요?\n배포하면 블로그에서 이 글이 내려갑니다.')) savePost('unpublish');
+    if (confirm('발행을 취소하고 임시저장 글로 바꿀까요?\nmain 에 반영하면 블로그에서 이 글이 내려갑니다.')) savePost('unpublish');
   });
   $('#view-editor .admin-meta').addEventListener('input', () => setDirty(true));
   $('#delete-post').addEventListener('click', async () => {

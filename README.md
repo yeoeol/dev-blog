@@ -23,11 +23,17 @@ Astro 기반 정적 개발 블로그. 마크다운 파일만으로 글을 관리
 - `Ctrl+S`: 임시저장 글은 임시저장, 발행된 글은 저장. 저장 안 한 채로 나가면 경고, 다른 곳에서 먼저 수정된 글은 덮어쓰지 않고 알려줌
 - 발행된 글을 수정하면 `updated`(수정일) 자동 기록
 
-### 배포는 원할 때 한 번에
+### 저장 기록은 작업 브랜치에, main 에는 커밋 하나로
 
-관리자 화면에서 저장·발행·삭제하면 커밋만 되고 배포는 돌지 않는다(커밋 메시지에 `[skip ci]`). 목록 화면 위쪽에 **배포되지 않은 변경 N건**이 표시되고, **지금 배포**를 누르면 그때까지의 변경이 GitHub Actions 한 번으로 블로그에 반영된다.
+관리자 화면의 저장·발행·삭제는 모두 작업 브랜치 `writing` 에 커밋된다(첫 로그인 때 main 에서 자동 생성). main 에는 아무것도 올라가지 않으므로 배포도 돌지 않는다.
 
-로컬에서 `git push` 한 경우에는 기존처럼 자동 배포된다(관리자 화면에서 쌓인 변경도 함께 반영).
+목록 화면 위쪽에 **main 에 반영되지 않은 커밋 N개**와 그 목록이 표시되고, 커밋 메시지를 정한 뒤 **main 에 반영 (squash)** 을 누르면:
+
+1. `writing` → main PR 을 만들어 **squash 병합** → main 에는 커밋 1개만 남는다 (본문에 세부 변경 목록 포함)
+2. 그 push 로 GitHub Actions 배포가 **한 번** 돈다
+3. `writing` 은 main 과 같은 지점으로 초기화된다. 저장 단위의 세부 커밋 기록은 병합된 PR 에 남는다
+
+로컬에서 main 에 직접 push 한 변경은 관리자 화면에 로그인하거나 목록을 새로고침할 때 `writing` 으로 자동으로 가져온다.
 
 ### 동작 방식과 권한
 
@@ -39,12 +45,12 @@ DB·서버 없이 브라우저에서 GitHub API 로 리포지토리에 직접 �
 
 1. GitHub → Settings → Developer settings → **Fine-grained tokens** → Generate new token
 2. Repository access: **Only select repositories** → 블로그 리포지토리 선택
-3. Permissions → Repository permissions → **Contents: Read and write**, **Actions: Read and write** (배포 버튼용)
+3. Permissions → Repository permissions → **Contents: Read and write**, **Pull requests: Read and write**
 4. 만료 기간은 원하는 만큼 (만료되면 새로 만들어 다시 로그인)
 
-토큰은 해당 브라우저에만 저장된다(기본: 탭을 닫으면 삭제, "로그인 유지" 체크 시 계속 유지). 리포지토리와 브랜치는 배포 빌드에서 자동으로 채워진다.
+토큰은 해당 브라우저에만 저장된다(기본: 탭을 닫으면 삭제, "로그인 유지" 체크 시 계속 유지). 리포지토리와 배포 브랜치는 배포 빌드에서 자동으로 채워진다.
 
-> 관리자 화면에서 저장하면 GitHub 에 바로 커밋되므로, 로컬에서도 작업한다면 시작 전에 `git pull` 을 먼저 한다.
+> 관리자 화면에서 main 에 반영하면 원격 main 에 커밋이 생기므로, 로컬에서도 작업한다면 시작 전에 `git pull` 을 먼저 한다.
 
 ## 로컬 실행
 

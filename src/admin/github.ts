@@ -23,18 +23,17 @@ export interface FileChange {
   content: { base64: string } | { sha: string } | null;
 }
 
-export interface WorkflowRun {
-  status: string;
-  conclusion: string | null;
-  head_sha: string;
-  html_url: string;
-  created_at: string;
-  event: string;
-}
-
-export interface PendingCommit {
+export interface BranchCommit {
   message: string;
   date: string;
+  isMerge: boolean;
+}
+
+export interface PullRequest {
+  number: number;
+  html_url: string;
+  mergeable: boolean | null;
+  head: { sha: string };
 }
 
 export class GitHubClient {
@@ -144,29 +143,85 @@ export class GitHubClient {
     });
   }
 
-  /** 워크플로 실행 (Actions: write 권한 필요) */
-  async runWorkflow(workflowFile: string): Promise<{ html_url: string }> {
-    return this.request<{ html_url: string }>(`/repos/${this.repo}/actions/workflows/${workflowFile}/dispatches`, {
+  // ------------------------------------------------------------ 브랜치 / squash 병합
+
+  async branchSha(branch: string): Promise<string | null> {
+    try {
+      const ref = await this.request<{ object: { sha: string } }>(
+        `/repos/${this.repo}/git/ref/heads/${encodeURIComponent(branch)}`,
+      );
+      return ref.object.sha;
+    } catch (error) {
+      if (error instanceof GitHubError && error.status === 404) return null;
+      throw error;
+    }
+  }
+
+  async createBranch(branch: string, sha: string): Promise<void> {
+    await this.request(`/repos/${this.repo}/git/refs`, {
       method: 'POST',
-      body: JSON.stringify({ ref: this.branch, return_run_details: true }),
+      body: JSON.stringify({ ref: `refs/heads/${branch}`, sha }),
     });
   }
 
-  async workflowRuns(workflowFile: string, options: { status?: string; perPage?: number } = {}): Promise<WorkflowRun[]> {
-    const query = new URLSearchParams({ branch: this.branch, per_page: String(options.perPage ?? 1) });
-    if (options.status) query.set('status', options.status);
-    const result = await this.request<{ workflow_runs: WorkflowRun[] }>(
-      `/repos/${this.repo}/actions/workflows/${workflowFile}/runs?${query}`,
-    );
-    return result.workflow_runs;
+  async moveBranch(branch: string, sha: string, force: boolean): Promise<void> {
+    await this.request(`/repos/${this.repo}/git/refs/heads/${encodeURIComponent(branch)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ sha, force }),
+    });
   }
 
-  /** base 커밋 이후 브랜치에 쌓인 커밋 */
-  async commitsSince(baseSha: string): Promise<PendingCommit[]> {
-    const result = await this.request<{ commits: { commit: { message: string; committer: { date: string } } }[] }>(
-      `/repos/${this.repo}/compare/${baseSha}...${encodeURIComponent(this.branch)}`,
-    );
-    return result.commits.map((c) => ({ message: c.commit.message, date: c.commit.committer.date }));
+  /** base 대비 head 에만 있는 커밋(ahead)과 base 에만 있는 커밋 수(behind) */
+  async compare(base: string, head: string): Promise<{ aheadBy: number; behindBy: number; commits: BranchCommit[] }> {
+    const result = await this.request<{
+      ahead_by: number;
+      behind_by: number;
+      commits: { commit: { message: string; committer: { date: string } }; parents: unknown[] }[];
+    }>(`/repos/${this.repo}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}`);
+    return {
+      aheadBy: result.ahead_by,
+      behindBy: result.behind_by,
+      commits: result.commits.map((c) => ({
+        message: c.commit.message,
+        date: c.commit.committer.date,
+        isMerge: c.parents.length > 1,
+      })),
+    };
+  }
+
+  /** head 브랜치를 base 브랜치에 병합 커밋으로 합친다. 충돌이면 GitHubError(409) */
+  async mergeBranch(base: string, head: string, message: string): Promise<void> {
+    await this.request(`/repos/${this.repo}/merges`, {
+      method: 'POST',
+      body: JSON.stringify({ base, head, commit_message: message }),
+    });
+  }
+
+  async findOpenPullRequest(head: string, base: string): Promise<PullRequest | null> {
+    const owner = this.repo.split('/')[0];
+    const query = new URLSearchParams({ state: 'open', head: `${owner}:${head}`, base });
+    const pulls = await this.request<PullRequest[]>(`/repos/${this.repo}/pulls?${query}`);
+    return pulls[0] ?? null;
+  }
+
+  async createPullRequest(head: string, base: string, title: string, body: string): Promise<PullRequest> {
+    return this.request<PullRequest>(`/repos/${this.repo}/pulls`, {
+      method: 'POST',
+      body: JSON.stringify({ head, base, title, body }),
+    });
+  }
+
+  async getPullRequest(number: number): Promise<PullRequest> {
+    return this.request<PullRequest>(`/repos/${this.repo}/pulls/${number}`);
+  }
+
+  /** PR 을 squash 병합. headSha 가 PR head 와 다르면(그 사이 새 커밋) GitHubError(409) */
+  async squashMerge(number: number, headSha: string, title: string, message: string): Promise<string> {
+    const result = await this.request<{ sha: string }>(`/repos/${this.repo}/pulls/${number}/merge`, {
+      method: 'PUT',
+      body: JSON.stringify({ merge_method: 'squash', sha: headSha, commit_title: title, commit_message: message }),
+    });
+    return result.sha;
   }
 }
 

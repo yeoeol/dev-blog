@@ -57,7 +57,7 @@ const defaultBranch = ADMIN_BRANCH || process.env.GITHUB_REF_NAME || 'main';
             <input id="login-repo" required placeholder="아이디/리포지토리" />
           </label>
           <label>
-            브랜치
+            배포 브랜치
             <input id="login-branch" placeholder="main" />
           </label>
           <label class="checkbox">
@@ -74,7 +74,7 @@ const defaultBranch = ADMIN_BRANCH || process.env.GITHUB_REF_NAME || 'main';
               에서 <b>Generate new token</b>
             </li>
             <li><b>Repository access</b>: Only select repositories → 블로그 리포지토리 하나만 선택</li>
-            <li><b>Permissions</b> → Repository permissions → <b>Contents: Read and write</b>, <b>Actions: Read and write</b> (배포 버튼용)</li>
+            <li><b>Permissions</b> → Repository permissions → <b>Contents: Read and write</b>, <b>Pull requests: Read and write</b></li>
             <li>생성된 토큰(<code>github_pat_...</code>)을 위에 붙여넣기</li>
           </ol>
           <p>토큰은 이 브라우저에만 저장되며, 이 블로그 리포지토리 외에는 접근할 수 없습니다. 공용 PC 에서는 "로그인 유지"를 끄세요.</p>
@@ -89,13 +89,17 @@ const defaultBranch = ADMIN_BRANCH || process.env.GITHUB_REF_NAME || 'main';
         </div>
         <section class="deploy-panel">
           <div class="deploy-row">
-            <span id="deploy-status" class="deploy-status">배포 상태 확인 중…</span>
-            <button id="deploy-now" class="btn primary" type="button">지금 배포</button>
+            <span id="deploy-status" class="deploy-status">반영 상태 확인 중…</span>
           </div>
-          <details id="deploy-pending-wrap" hidden>
-            <summary>배포될 변경 내역</summary>
+          <div id="deploy-form" class="deploy-row" hidden>
+            <input id="deploy-title" class="deploy-title" placeholder="main 에 남길 커밋 메시지" autocomplete="off" />
+            <button id="deploy-now" class="btn primary" type="button">main 에 반영 (squash)</button>
+          </div>
+          <details>
+            <summary>반영될 커밋 목록</summary>
             <ul id="deploy-pending"></ul>
           </details>
+          <p id="deploy-result" class="admin-muted"></p>
         </section>
         <div class="admin-toolbar">
           <input id="post-filter" class="admin-search" type="search" placeholder="제목, 카테고리, 태그로 찾기" />
