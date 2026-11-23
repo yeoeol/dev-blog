@@ -40,7 +40,7 @@ export default defineConfig({
       },
     }),
     mdx(),
-    sitemap(),
+    sitemap({ filter: (page) => !page.includes('/admin') }),
   ],
   markdown: {
     // remark/rehype 플러그인 생태계를 쓰기 위해 unified 프로세서 사용 (.mdx 도 이 설정을 그대로 따른다)
@@ -48,7 +48,14 @@ export default defineConfig({
       remarkPlugins: [remarkMermaid, remarkMath, remarkEmoji, remarkFlexibleMarkers],
       rehypePlugins: [
         [rehypeKatex, { strict: false }],
-        [rehypeCallouts, { theme: 'obsidian' }],
+        [
+          rehypeCallouts,
+          {
+            theme: 'obsidian',
+            // 관리자 에디터의 '토글' 블록: > [!toggle]- 제목
+            callouts: { toggle: { title: '토글', indicator: '' } },
+          },
+        ],
         rehypeFigure,
       ],
     }),

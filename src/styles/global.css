@@ -874,6 +874,12 @@ details[open] > summary.category-link::before {
   margin-bottom: 0;
 }
 
+/* 관리자 에디터의 토글 블록 (> [!toggle]- 제목) */
+[data-callout='toggle'] {
+  --rc-color-light: #57606a;
+  --rc-color-dark: #9aa3ad;
+}
+
 /* ---------- Search (Pagefind Component UI) ---------- */
 
 /* pagefind CSS 의 :root 기본값보다 우선하도록 html:root 사용 → 다크 모드도 사이트 변수를 따라감 */

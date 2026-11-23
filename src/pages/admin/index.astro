@@ -1,0 +1,153 @@
+---
+import 'pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css';
+import '../../styles/global.css';
+import '@milkdown/crepe/theme/common/style.css';
+import '../../styles/admin.css';
+import { SITE_TITLE, ADMIN_REPO, ADMIN_BRANCH } from '../../consts';
+import { withBase } from '../../lib/url';
+
+// GitHub Actions 빌드에서는 GITHUB_REPOSITORY / GITHUB_REF_NAME 이 자동으로 주어진다.
+const defaultRepo = ADMIN_REPO || process.env.GITHUB_REPOSITORY || '';
+const defaultBranch = ADMIN_BRANCH || process.env.GITHUB_REF_NAME || 'main';
+---
+
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>글 관리 | {SITE_TITLE}</title>
+    <link rel="icon" type="image/svg+xml" href={withBase('/favicon.svg')} />
+    <script is:inline>
+      (() => {
+        let theme = null;
+        try { theme = localStorage.getItem('theme'); } catch {}
+        const dark = theme ? theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+        document.documentElement.classList.toggle('dark', dark);
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="admin" data-site-base={withBase('/')} data-default-repo={defaultRepo} data-default-branch={defaultBranch}>
+      <header class="site-header">
+        <div class="header-inner">
+          <a class="site-title" href="#">{SITE_TITLE} <span class="admin-badge">관리</span></a>
+          <nav class="header-nav">
+            <span id="admin-user" hidden>
+              <span id="admin-login-name" class="admin-login-name"></span>
+              <button id="logout" type="button">로그아웃</button>
+            </span>
+            <a href={withBase('/')} target="_blank" rel="noopener">블로그 보기</a>
+          </nav>
+        </div>
+      </header>
+
+      <!-- 로그인 -->
+      <section id="view-login" class="admin-container narrow" hidden>
+        <h1 class="page-title">운영자 로그인</h1>
+        <p class="page-subtitle">블로그 리포지토리에 쓰기 권한이 있는 GitHub 토큰으로 로그인합니다.</p>
+        <form id="login-form" class="admin-form">
+          <label>
+            GitHub 토큰
+            <input id="login-token" type="password" autocomplete="off" required placeholder="github_pat_..." />
+          </label>
+          <label>
+            리포지토리
+            <input id="login-repo" required placeholder="아이디/리포지토리" />
+          </label>
+          <label>
+            브랜치
+            <input id="login-branch" placeholder="main" />
+          </label>
+          <label class="checkbox">
+            <input id="login-remember" type="checkbox" />
+            이 브라우저에서 로그인 유지
+          </label>
+          <button class="btn primary" type="submit">로그인</button>
+        </form>
+        <details class="admin-help">
+          <summary>토큰 만드는 방법</summary>
+          <ol>
+            <li>
+              <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">GitHub → Settings → Developer settings → Fine-grained tokens</a>
+              에서 <b>Generate new token</b>
+            </li>
+            <li><b>Repository access</b>: Only select repositories → 블로그 리포지토리 하나만 선택</li>
+            <li><b>Permissions</b> → Repository permissions → <b>Contents: Read and write</b></li>
+            <li>생성된 토큰(<code>github_pat_...</code>)을 위에 붙여넣기</li>
+          </ol>
+          <p>토큰은 이 브라우저에만 저장되며, 이 블로그 리포지토리 외에는 접근할 수 없습니다. 공용 PC 에서는 "로그인 유지"를 끄세요.</p>
+        </details>
+      </section>
+
+      <!-- 글 목록 -->
+      <section id="view-list" class="admin-container" hidden>
+        <div class="admin-toolbar">
+          <h1 class="page-title">글 관리</h1>
+          <a class="btn primary" href="#new">+ 새 글</a>
+        </div>
+        <div class="admin-toolbar">
+          <input id="post-filter" class="admin-search" type="search" placeholder="제목, 카테고리, 태그로 찾기" />
+          <span id="post-count" class="admin-muted"></span>
+          <button id="refresh-posts" class="btn" type="button">새로고침</button>
+        </div>
+        <ul id="post-list" class="admin-post-list"></ul>
+      </section>
+
+      <!-- 에디터 -->
+      <section id="view-editor" class="admin-container" hidden>
+        <div class="admin-editor-bar">
+          <a class="btn" href="#">← 목록</a>
+          <span id="save-status" class="admin-muted"></span>
+          <div class="admin-editor-actions">
+            <label class="switch">
+              <input id="meta-publish" type="checkbox" />
+              <span class="switch-track"></span>
+              <span id="publish-label">비공개</span>
+            </label>
+            <button id="delete-post" class="btn danger" type="button">삭제</button>
+            <button id="save-post" class="btn primary" type="button" title="Ctrl+S">저장</button>
+          </div>
+        </div>
+
+        <div class="admin-meta">
+          <input id="meta-title" class="admin-title-input" placeholder="제목 없음" autocomplete="off" />
+          <div class="admin-meta-grid">
+            <label>
+              카테고리
+              <input id="meta-category" list="category-options" placeholder="예: Backend/Spring" autocomplete="off" />
+              <datalist id="category-options"></datalist>
+            </label>
+            <label>
+              <span>태그 <small>(쉼표로 구분)</small></span>
+              <input id="meta-tags" placeholder="예: JPA, 성능" autocomplete="off" />
+              <small id="tag-suggestions" class="admin-muted"></small>
+            </label>
+            <label>
+              작성일
+              <input id="meta-date" type="datetime-local" />
+            </label>
+            <label>
+              파일 경로 (URL)
+              <input id="meta-slug" placeholder="spring/jpa-n-plus-1" autocomplete="off" />
+              <small id="meta-slug-hint" class="admin-muted"></small>
+            </label>
+            <label class="full">
+              <span>설명 <small>(목록·검색 결과에 표시)</small></span>
+              <input id="meta-description" placeholder="한 줄 요약" autocomplete="off" />
+            </label>
+          </div>
+        </div>
+
+        <div id="editor-root" class="admin-editor"></div>
+      </section>
+
+      <div id="toast" class="admin-toast" role="status" hidden></div>
+    </div>
+
+    <script>
+      import '../../admin/app';
+    </script>
+  </body>
+</html>
