@@ -2,18 +2,19 @@
 title: "마크다운 문법 가이드"
 description: "이 블로그에서 쓸 수 있는 모든 마크다운·HTML 문법과 렌더링 결과"
 category: "Blog/Guide"
-tags: ["markdown", "블로그"]
+tags: [ markdown, 블로그 ]
 date: 2026-11-23T16:00:00+09:00
+draft: true
 ---
 
 이 글은 블로그에서 지원하는 문법을 모두 모아둔 레퍼런스입니다. 각 항목마다 **작성법**과 **결과**를 같이 보여줍니다.
 
 ## 텍스트 서식
 
-````md
+```md
 **굵게**, *기울임*, ***굵게+기울임***, ~~취소선~~, `인라인 코드`, ==형광펜==
 <u>밑줄</u>, H<sub>2</sub>O, x<sup>2</sup>, <kbd>Ctrl</kbd> + <kbd>C</kbd>
-````
+```
 
 **굵게**, *기울임*, ***굵게+기울임***, ~~취소선~~, `인라인 코드`, ==형광펜==
 <u>밑줄</u>, H<sub>2</sub>O, x<sup>2</sup>, <kbd>Ctrl</kbd> + <kbd>C</kbd>
@@ -30,15 +31,15 @@ date: 2026-11-23T16:00:00+09:00
 
 ## 링크와 이미지
 
-````md
+```md
 [외부 링크](https://astro.build)
 <https://github.com> 처럼 꺾쇠로 감싸거나 https://github.com 처럼 그냥 써도 링크가 됩니다.
 
 ![대체 텍스트](./images/markdown-guide/sample.png)
-````
+```
 
 [외부 링크](https://astro.build)
-<https://github.com> 처럼 꺾쇠로 감싸거나 https://github.com 처럼 그냥 써도 링크가 됩니다.
+<https://github.com> 처럼 꺾쇠로 감싸거나 <https://github.com> 처럼 그냥 써도 링크가 됩니다.
 
 ![샘플 이미지](./images/markdown-guide/sample.png)
 
@@ -46,9 +47,9 @@ date: 2026-11-23T16:00:00+09:00
 
 따옴표로 제목을 붙이면 이미지 아래 **캡션**으로 표시됩니다.
 
-````md
+```md
 ![샘플 이미지](./images/markdown-guide/sample.png "그림 1. 이미지 캡션")
-````
+```
 
 ![샘플 이미지](./images/markdown-guide/sample.png "그림 1. 이미지 캡션")
 
@@ -60,7 +61,7 @@ date: 2026-11-23T16:00:00+09:00
 
 ## 목록
 
-````md
+```md
 - 순서 없는 목록
   - 들여쓰기로 중첩
     - 더 깊게
@@ -69,7 +70,7 @@ date: 2026-11-23T16:00:00+09:00
 
 - [x] 완료한 일
 - [ ] 아직 안 한 일
-````
+```
 
 - 순서 없는 목록
   - 들여쓰기로 중첩
@@ -90,7 +91,7 @@ date: 2026-11-23T16:00:00+09:00
 
 GitHub / Obsidian 스타일 콜아웃(Notion 의 콜아웃 블록)을 지원합니다.
 
-````md
+```md
 > [!NOTE]
 > 참고 내용
 
@@ -99,7 +100,7 @@ GitHub / Obsidian 스타일 콜아웃(Notion 의 콜아웃 블록)을 지원합�
 
 > [!WARNING]- 접힌 상태로 시작하는 콜아웃
 > `-` 를 붙이면 접혀 있고, `+` 를 붙이면 펼쳐진 상태로 접기 가능
-````
+```
 
 > [!NOTE]
 > 참고 내용
@@ -123,6 +124,7 @@ GitHub / Obsidian 스타일 콜아웃(Notion 의 콜아웃 블록)을 지원합�
 
 > [!example] 예시
 > 콜아웃 안에서도 **모든 마크다운**과 코드가 동작합니다.
+>
 > ```java
 > System.out.println("hello");
 > ```
@@ -131,14 +133,14 @@ GitHub / Obsidian 스타일 콜아웃(Notion 의 콜아웃 블록)을 지원합�
 
 Notion 의 토글 블록은 HTML `<details>` 로 씁니다. 안쪽에 마크다운을 쓰려면 태그 앞뒤로 **빈 줄**을 두세요.
 
-````md
+```md
 <details>
 <summary>클릭해서 펼치기</summary>
 
 숨겨진 내용입니다. **마크다운**도 됩니다.
 
 </details>
-````
+```
 
 <details>
 <summary>클릭해서 펼치기</summary>
@@ -179,16 +181,16 @@ public class MemberService {
 }
 ```
 
-| 옵션 | 예시 | 설명 |
-| --- | --- | --- |
-| 파일명 | `title="App.java"` | 상단에 파일 탭 표시 |
-| 줄 강조 | `{1,3-5}` | 해당 줄 배경 강조 |
-| 추가/삭제 줄 | `ins={2} del={3}` | 초록/빨강 표시 |
-| 단어 강조 | `"findById"` | 해당 단어 강조 |
-| 줄 번호 | `showLineNumbers` | 줄 번호 표시 |
-| 시작 줄 번호 | `startLineNumber=10` | 줄 번호 시작값 |
-| 접기 | `collapse={1-5}` | 해당 줄을 접어서 표시 |
-| 줄바꿈 | `wrap` | 긴 줄 자동 줄바꿈 |
+| 옵션      | 예시                   | 설명           |
+| ------- | -------------------- | ------------ |
+| 파일명     | `title="App.java"`   | 상단에 파일 탭 표시  |
+| 줄 강조    | `{1,3-5}`            | 해당 줄 배경 강조   |
+| 추가/삭제 줄 | `ins={2} del={3}`    | 초록/빨강 표시     |
+| 단어 강조   | `"findById"`         | 해당 단어 강조     |
+| 줄 번호    | `showLineNumbers`    | 줄 번호 표시      |
+| 시작 줄 번호 | `startLineNumber=10` | 줄 번호 시작값     |
+| 접기      | `collapse={1-5}`     | 해당 줄을 접어서 표시 |
+| 줄바꿈     | `wrap`               | 긴 줄 자동 줄바꿈   |
 
 추가/삭제 표시:
 
@@ -232,16 +234,16 @@ docker compose up -d
 
 ## 표
 
-````md
+```md
 | 왼쪽 정렬 | 가운데 정렬 | 오른쪽 정렬 |
 | :--- | :---: | ---: |
 | A | B | C |
-````
+```
 
-| 왼쪽 정렬 | 가운데 정렬 | 오른쪽 정렬 |
-| :--- | :---: | ---: |
-| `@Transactional` | 트랜잭션 | 1 |
-| `@Service` | 서비스 계층 | 2 |
+| 왼쪽 정렬            | 가운데 정렬 | 오른쪽 정렬 |
+| :--------------- | :----: | -----: |
+| `@Transactional` |  트랜잭션  |      1 |
+| `@Service`       | 서비스 계층 |      2 |
 
 셀 병합 같은 복잡한 표는 HTML `<table>` 로 직접 작성하면 됩니다.
 
@@ -257,13 +259,13 @@ docker compose up -d
 
 ## 수식 (KaTeX)
 
-````md
+```md
 인라인 수식: $O(n \log n)$
 
 $$
 T(n) = 2T\left(\frac{n}{2}\right) + O(n)
 $$
-````
+```
 
 인라인 수식: $O(n \log n)$
 
@@ -313,11 +315,11 @@ flowchart, sequence, class, state, ER, gantt, pie, mindmap 등 Mermaid 의 모�
 
 ## 각주
 
-````md
+```md
 JPA 는 영속성 컨텍스트[^1]를 사용합니다.
 
 [^1]: 엔티티를 영구 저장하는 환경.
-````
+```
 
 JPA 는 영속성 컨텍스트[^1]를 사용합니다.
 
