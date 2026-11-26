@@ -52,6 +52,7 @@ const activeCategory = categoryPath(post.data.category);
           )
         }
         {post.data.draft && <span class="draft-badge">DRAFT</span>}
+        {post.data.private && <span class="draft-badge private">PRIVATE</span>}
       </div>
       {
         post.data.tags.length > 0 && (

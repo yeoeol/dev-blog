@@ -222,6 +222,15 @@
   color: #16a34a;
 }
 
+.post-state[data-state='private'] {
+  background: rgba(100, 116, 139, 0.16);
+  color: #475569;
+}
+
+.dark .post-state[data-state='private'] {
+  color: #cbd5e1;
+}
+
 .post-state[data-state='draft'] {
   background: rgba(245, 158, 11, 0.14);
   color: #b45309;

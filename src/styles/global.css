@@ -466,6 +466,10 @@ details[open] > summary.category-link::before {
   font-weight: 700;
 }
 
+.draft-badge.private {
+  background: #64748b;
+}
+
 .tag-list,
 .tag-cloud {
   display: flex;

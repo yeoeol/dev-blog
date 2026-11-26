@@ -214,6 +214,7 @@ function renderPostList() {
             <span class="admin-post-category">${escapeHtml(post.meta.category)}</span>
             <span>${escapeHtml(formatListDate(post.meta.date))}</span>
             ${post.meta.draft ? '<span class="draft-badge">임시저장</span>' : ''}
+            ${post.meta.private ? '<span class="draft-badge private">비공개</span>' : ''}
             ${post.editable ? '' : '<span class="draft-badge mdx">MDX</span>'}
           </div>
           ${
@@ -224,7 +225,7 @@ function renderPostList() {
           <div class="admin-post-path">${escapeHtml(post.path.slice(POSTS_DIR.length))}</div>
         </div>
         <div class="admin-post-actions">
-          ${post.meta.draft ? '' : `<a class="btn" href="${siteBase}/posts/${postId(post.path)}/" target="_blank" rel="noopener">보기</a>`}
+          ${post.meta.draft || post.meta.private ? '' : `<a class="btn" href="${siteBase}/posts/${postId(post.path)}/" target="_blank" rel="noopener">보기</a>`}
           ${post.editable ? `<a class="btn" href="#edit=${encodeURIComponent(post.path)}">편집</a>` : ''}
           <button class="btn danger" type="button" data-delete="${escapeHtml(post.path)}">삭제</button>
         </div>
@@ -424,10 +425,18 @@ function autoDraftPath(): string {
 }
 
 const isAutoDraftPath = (path: string | null) => path !== null && path.startsWith(DRAFT_DIR);
-/** 발행된 적 있는 글(= 현재 공개 상태로 저장된 글)은 경로를 바꾸지 않는다 */
-const isPublished = () => editing?.parsed?.meta.draft === false;
+type PostState = 'new' | 'draft' | 'private' | 'published';
 
-function readForm(draft: boolean): PostMeta {
+function postState(meta: PostMeta | null | undefined, path: string | null): PostState {
+  if (path === null || !meta) return 'new';
+  if (meta.draft) return 'draft';
+  return meta.private ? 'private' : 'published';
+}
+
+/** 발행된 글(블로그에 공개 중인 글)은 경로를 바꾸지 않는다 */
+const isPublished = () => editing !== null && postState(editing.parsed?.meta, editing.path) === 'published';
+
+function readForm(mode: SaveMode): PostMeta {
   const dateValue = $<HTMLInputElement>('#meta-date').value;
   return {
     title: $<HTMLInputElement>('#meta-title').value.trim(),
@@ -443,7 +452,8 @@ function readForm(draft: boolean): PostMeta {
       .filter(Boolean),
     date: dateValue ? nowWithOffset(new Date(dateValue)) : nowWithOffset(),
     updated: editing?.parsed?.meta.updated ?? '',
-    draft,
+    draft: mode === 'draft',
+    private: mode === 'private',
   };
 }
 
@@ -454,7 +464,8 @@ function fillForm(meta: PostMeta | null, path: string | null) {
   $<HTMLInputElement>('#meta-tags').value = meta?.tags.join(', ') ?? '';
   $<HTMLInputElement>('#meta-date').value = toInputDateTime(meta?.date ?? '');
 
-  const published = meta?.draft === false;
+  const state = postState(meta, path);
+  const published = state === 'published';
   const slug = $<HTMLInputElement>('#meta-slug');
   slug.value = path && !isAutoDraftPath(path) ? postId(path) : '';
   slug.disabled = published;
@@ -462,10 +473,11 @@ function fillForm(meta: PostMeta | null, path: string | null) {
     ? '발행된 글의 경로(URL)는 바뀌지 않습니다.'
     : '발행 전까지 비워 둘 수 있습니다. 영문 소문자, 숫자, -, / 만 사용. 예: spring/jpa-n-plus-1';
 
-  $('#post-state').textContent = path === null ? '새 글' : published ? '발행된 글' : '임시저장 글';
-  $('#post-state').dataset.state = path === null ? 'new' : published ? 'published' : 'draft';
-  $('#save-draft').hidden = published;
-  $('#unpublish-post').hidden = !published;
+  $('#post-state').textContent = { new: '새 글', draft: '임시저장 글', private: '비공개 글', published: '발행된 글' }[state];
+  $('#post-state').dataset.state = state;
+  // 새 글·임시저장: [임시저장] [비공개 저장] [발행] / 비공개: [저장] [발행] / 발행됨: [비공개로 전환] [저장]
+  $('#save-draft').hidden = state === 'private' || state === 'published';
+  $('#save-private').textContent = { new: '비공개 저장', draft: '비공개 저장', private: '저장', published: '비공개로 전환' }[state];
   $('#publish-post').textContent = published ? '저장' : '발행';
   $('#delete-post').hidden = path === null;
 }
@@ -592,16 +604,19 @@ function resolveImage(src: string, postPath: string | null, pendingImages: Map<s
   return remoteImageCache.get(repoPath)!.catch(() => src);
 }
 
-type SaveMode = 'draft' | 'publish' | 'unpublish';
+type SaveMode = 'draft' | 'private' | 'publish';
 
-const SAVE_BUTTONS = ['#save-draft', '#publish-post', '#unpublish-post', '#delete-post'];
+const SAVE_BUTTONS = ['#save-draft', '#save-private', '#publish-post', '#delete-post'];
 
 async function savePost(mode: SaveMode) {
   if (!editing || editing.saving) return;
-  const draft = mode !== 'publish';
-  const meta = readForm(draft);
+  const draft = mode === 'draft';
+  const wasPublished = isPublished();
+  // 비공개·발행은 완성된 글로 보고 카테고리와 경로를 요구한다
+  const finishLabel = mode === 'publish' ? '발행' : '비공개 저장';
+  const meta = readForm(mode);
   if (!meta.title) return toast('제목을 입력하세요.', 'error');
-  if (!draft && !meta.category) return toast('발행하려면 카테고리를 입력하세요.', 'error');
+  if (!draft && !meta.category) return toast(`${finishLabel}하려면 카테고리를 입력하세요.`, 'error');
   if (draft && !meta.category) meta.category = '미분류';
 
   // 저장할 경로 결정: 발행 전 글만 경로를 바꿀 수 있다
@@ -615,7 +630,7 @@ async function savePost(mode: SaveMode) {
     path = `${POSTS_DIR}${slug}.md`;
   } else if (!draft) {
     $<HTMLInputElement>('#meta-slug').focus();
-    return toast('발행하려면 파일 경로(URL)를 입력하세요.', 'error');
+    return toast(`${finishLabel}하려면 파일 경로(URL)를 입력하세요.`, 'error');
   } else {
     path = editing.path ?? autoDraftPath();
   }
@@ -637,7 +652,7 @@ async function savePost(mode: SaveMode) {
     }
 
     // 발행된 글을 다시 저장하면 수정일 기록
-    if (isPublished() && mode === 'publish') meta.updated = nowWithOffset();
+    if (wasPublished && mode === 'publish') meta.updated = nowWithOffset();
 
     const changes: FileChange[] = [];
     const newImageDir = `./images/${baseNameOf(path)}/`;
@@ -669,7 +684,11 @@ async function savePost(mode: SaveMode) {
 
     const content = serializePost(meta, body, editing.parsed?.document);
     changes.unshift({ path, content: { base64: textToBase64(content) } });
-    const action = { draft: 'draft', publish: isPublished() ? 'update' : 'post', unpublish: 'unpublish' }[mode];
+    const action = {
+      draft: 'draft',
+      private: wasPublished ? 'unpublish' : 'private',
+      publish: wasPublished ? 'update' : 'post',
+    }[mode];
     // 작업 브랜치(writing)에 커밋 → 목록 화면의 "main 에 반영" 으로 한 번에 squash 병합
     await client!.commit(changes, `${action}: ${meta.title}`);
 
@@ -694,8 +713,10 @@ async function savePost(mode: SaveMode) {
     toast(
       {
         draft: '임시저장했습니다.',
+        private: wasPublished
+          ? '비공개로 전환했습니다. main 에 반영하면 블로그에서 내려갑니다.'
+          : '비공개로 저장했습니다. 블로그에는 보이지 않습니다.',
         publish: '저장했습니다. 목록 화면에서 main 에 반영하면 블로그에 올라갑니다.',
-        unpublish: '발행을 취소하고 임시저장 글로 바꿨습니다. main 에 반영하면 블로그에서 내려갑니다.',
       }[mode],
     );
   } catch (error) {
@@ -710,8 +731,9 @@ async function savePost(mode: SaveMode) {
 function setupEditor() {
   $('#save-draft').addEventListener('click', () => savePost('draft'));
   $('#publish-post').addEventListener('click', () => savePost('publish'));
-  $('#unpublish-post').addEventListener('click', () => {
-    if (confirm('발행을 취소하고 임시저장 글로 바꿀까요?\nmain 에 반영하면 블로그에서 이 글이 내려갑니다.')) savePost('unpublish');
+  $('#save-private').addEventListener('click', () => {
+    if (isPublished() && !confirm('이 글을 비공개로 전환할까요?\nmain 에 반영하면 블로그에서 이 글이 내려갑니다.')) return;
+    savePost('private');
   });
   $('#view-editor .admin-meta').addEventListener('input', () => setDirty(true));
   $('#delete-post').addEventListener('click', async () => {
@@ -729,8 +751,9 @@ function setupEditor() {
   window.addEventListener('keydown', (event) => {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's' && editing) {
       event.preventDefault();
-      // 발행된 글은 저장, 그 외에는 임시저장
-      savePost(isPublished() ? 'publish' : 'draft');
+      // 현재 상태를 유지한 채 저장: 발행된 글 → 저장, 비공개 글 → 비공개 저장, 그 외 → 임시저장
+      const state = postState(editing.parsed?.meta, editing.path);
+      savePost(state === 'published' ? 'publish' : state === 'private' ? 'private' : 'draft');
     }
   });
   window.addEventListener('beforeunload', (event) => {

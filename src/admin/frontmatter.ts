@@ -9,6 +9,7 @@ export interface PostMeta {
   date: string;
   updated: string;
   draft: boolean;
+  private: boolean;
 }
 
 export interface ParsedPost {
@@ -36,6 +37,7 @@ export function parsePost(source: string): ParsedPost {
       date: asString(data.date),
       updated: asString(data.updated),
       draft: data.draft === true,
+      private: data.private === true,
     },
     body: match ? source.slice(match[0].length) : source,
     document,
@@ -54,6 +56,7 @@ export function serializePost(meta: PostMeta, body: string, document: Document =
   set('date', meta.date, true);
   set('updated', meta.updated, meta.updated !== '');
   set('draft', meta.draft, meta.draft);
+  set('private', meta.private, meta.private);
 
   const yaml = document.toString({ lineWidth: 0 }).trimEnd();
   return `---\n${yaml}\n---\n\n${body.trim()}\n`;
