@@ -4,7 +4,7 @@ description: "글 파일 만들기, 카테고리·태그 지정, 이미지 넣�
 category: "Blog"
 tags: [ 블로그 ]
 date: 2026-11-23T15:00:00+09:00
-draft: true
+private: true
 ---
 
 ## 관리자 화면에서 쓰기
