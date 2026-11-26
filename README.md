@@ -22,6 +22,7 @@ Astro 기반 정적 개발 블로그. 마크다운 파일만으로 글을 관리
 - **비공개 저장**: 완성된 글을 블로그에 보이지 않게 저장(`private: true`). 임시저장 목록에는 나오지 않음. 발행된 글은 "비공개로 전환"으로 내릴 수 있음
 - **발행**: 블로그에 공개. 비공개·발행에는 카테고리와 글 이름(영문)이 필요
 - **주소(파일 경로)는 자동**: 카테고리가 폴더, 글 이름이 파일명이 된다. 카테고리 `Backend/Spring` + 글 이름 `jpa-n-plus-1` → `src/content/posts/backend/spring/jpa-n-plus-1.md`, 주소 `/posts/backend/spring/jpa-n-plus-1/`. 발행 전에는 카테고리를 바꾸면 파일도 새 폴더로 옮겨지고, 발행 후에는 주소가 고정된다
+- **미리보기**: 저장·발행 없이 지금 쓰는 글이 블로그에 어떻게 보일지 확인. 블로그 빌드와 같은 마크다운 설정(`src/markdown/options.mjs`)으로 렌더링한다
 - `Ctrl+S`: 현재 상태(임시저장/비공개/발행) 그대로 저장. 저장 안 한 채로 나가면 경고, 다른 곳에서 먼저 수정된 글은 덮어쓰지 않고 알려줌
 - 발행된 글을 수정하면 `updated`(수정일) 자동 기록
 
@@ -130,6 +131,7 @@ src/
 ├─ pages/                라우트 (글, 카테고리, 태그, 404, admin)
 ├─ admin/                관리자 화면 (GitHub API, 에디터, 머리말 처리)
 ├─ plugins/              mermaid / 이미지 캡션 플러그인
+├─ markdown/options.mjs  마크다운·코드블록 설정 (블로그 빌드와 관리자 미리보기가 공유)
 └─ styles/global.css     전체 스타일
 scripts/new-post.mjs     새 글 생성 스크립트
 .github/workflows/       GitHub Pages 배포

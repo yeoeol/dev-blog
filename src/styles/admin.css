@@ -433,6 +433,25 @@
   background: #b91c1c;
 }
 
+/* ---------- 미리보기 (블로그 글 페이지와 같은 폭) ---------- */
+
+.admin-preview {
+  max-width: var(--content-width);
+  margin: 0 auto;
+  padding: 8px 0 80px;
+}
+
+.admin-preview[hidden],
+.admin-meta[hidden],
+.admin-editor[hidden] {
+  display: none;
+}
+
+#toggle-preview[aria-pressed='true'] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 /* ---------- Milkdown(Crepe) 에디터를 블로그 본문과 같은 느낌으로 ---------- */
 
 .admin-editor {

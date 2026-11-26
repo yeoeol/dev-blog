@@ -1,5 +1,7 @@
 ---
 import 'pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css';
+import 'katex/dist/katex.min.css';
+import 'rehype-callouts/theme/obsidian';
 import '../../styles/global.css';
 import '@milkdown/crepe/theme/common/style.css';
 import '../../styles/admin.css';
@@ -116,6 +118,7 @@ const defaultBranch = ADMIN_BRANCH || process.env.GITHUB_REF_NAME || 'main';
           <span id="post-state" class="post-state"></span>
           <span id="save-status" class="admin-muted"></span>
           <div class="admin-editor-actions">
+            <button id="toggle-preview" class="btn" type="button">미리보기</button>
             <button id="delete-post" class="btn danger" type="button">삭제</button>
             <button id="save-draft" class="btn" type="button" title="Ctrl+S">임시저장</button>
             <button id="save-private" class="btn" type="button">비공개 저장</button>
@@ -158,6 +161,20 @@ const defaultBranch = ADMIN_BRANCH || process.env.GITHUB_REF_NAME || 'main';
         </div>
 
         <div id="editor-root" class="admin-editor"></div>
+
+        <!-- 미리보기: 블로그 글 페이지와 같은 마크업·스타일 -->
+        <div id="preview" class="admin-preview" hidden>
+          <article class="post">
+            <header class="post-header">
+              <nav id="preview-breadcrumb" class="breadcrumb" aria-label="카테고리 경로"></nav>
+              <h1 id="preview-title"></h1>
+              <p id="preview-lead" class="post-lead"></p>
+              <div class="post-info"><time id="preview-date"></time></div>
+              <div id="preview-tags" class="tag-list"></div>
+            </header>
+            <div id="preview-body" class="prose"></div>
+          </article>
+        </div>
       </section>
 
       <div id="toast" class="admin-toast" role="status" hidden></div>

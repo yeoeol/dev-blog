@@ -578,9 +578,85 @@ async function renderDraftPanel(show: boolean) {
   panel.hidden = false;
 }
 
+// ---------------------------------------------------------------- 미리보기
+
+let previewRun = 0;
+
+function setPreviewMode(on: boolean) {
+  $('#preview').hidden = !on;
+  $<HTMLElement>('#view-editor .admin-meta').hidden = on;
+  $('#editor-root').hidden = on;
+  if (on) $('#draft-panel').hidden = true;
+  const button = $('#toggle-preview');
+  button.textContent = on ? '편집으로' : '미리보기';
+  button.setAttribute('aria-pressed', String(on));
+}
+
+const isPreviewing = () => !$('#preview').hidden;
+
+/** 지금 에디터 내용을 블로그에 발행됐을 때와 같은 모습으로 보여 준다 (저장·발행 없이) */
+async function showPreview() {
+  if (!editing) return;
+  const run = ++previewRun;
+  const current = editing;
+  const meta = readForm('draft');
+  setPreviewMode(true);
+  window.scrollTo({ top: 0 });
+
+  const segments = meta.category.split('/').filter(Boolean);
+  $('#preview-breadcrumb').innerHTML = (segments.length ? segments : ['미분류'])
+    .map((segment) => `<a>${escapeHtml(segment)}</a>`)
+    .join('<span class="sep">›</span>');
+  $('#preview-title').textContent = meta.title || '(제목 없음)';
+  $('#preview-lead').textContent = meta.description;
+  $('#preview-lead').hidden = meta.description === '';
+  $('#preview-date').textContent = new Intl.DateTimeFormat('ko-KR', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    timeZone: 'Asia/Seoul',
+  }).format(new Date(meta.date));
+  $('#preview-tags').innerHTML = meta.tags.map((tag) => `<span class="tag">#${escapeHtml(tag)}</span>`).join('');
+  $('#preview-tags').hidden = meta.tags.length === 0;
+
+  const body = $('#preview-body');
+  body.innerHTML = '<p class="admin-empty">미리보기를 만드는 중…</p>';
+  try {
+    const { renderMarkdown, enhancePreview } = await import('./preview');
+    const html = await renderMarkdown(applyRewrites(current.editor.getMarkdown(), current.imageRewrites));
+    if (run !== previewRun || editing !== current) return;
+
+    // template 안에서는 이미지가 로드되지 않으므로, 넣기 전에 저장소·업로드 대기 이미지 경로를 표시용 URL 로 바꾼다
+    const template = document.createElement('template');
+    template.innerHTML = html;
+    await Promise.all(
+      [...template.content.querySelectorAll('img')].map(async (img) => {
+        const src = img.getAttribute('src');
+        if (src) img.src = await resolveImage(src, current.path, current.pendingImages);
+      }),
+    );
+    template.content.querySelectorAll<HTMLAnchorElement>('a[href]').forEach((a) => {
+      a.target = '_blank';
+      a.rel = 'noopener';
+    });
+    if (run !== previewRun || editing !== current) return;
+    body.replaceChildren(template.content);
+    await enhancePreview(body);
+  } catch (error) {
+    body.innerHTML = `<p class="admin-empty">미리보기를 만들지 못했습니다: ${escapeHtml(errorMessage(error))}</p>`;
+  }
+}
+
+function hidePreview() {
+  previewRun++;
+  setPreviewMode(false);
+  if (editing && editing.path === null) renderDraftPanel(true);
+}
+
 async function openEditor(path: string | null) {
   await closeEditor();
   showView('editor');
+  setPreviewMode(false);
 
   let parsed: ParsedPost | null = null;
   let sha: string | null = null;
@@ -783,6 +859,7 @@ function setupEditor() {
   });
   $('#view-editor .admin-meta').addEventListener('input', () => setDirty(true));
   $('#meta-category').addEventListener('input', updatePathPreview);
+  $('#toggle-preview').addEventListener('click', () => (isPreviewing() ? hidePreview() : showPreview()));
   $('#meta-slug').addEventListener('input', updatePathPreview);
   $('#delete-post').addEventListener('click', async () => {
     if (!editing?.path || !editing.sha) return;
