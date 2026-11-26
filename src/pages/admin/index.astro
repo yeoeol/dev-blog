@@ -146,8 +146,8 @@ const defaultBranch = ADMIN_BRANCH || process.env.GITHUB_REF_NAME || 'main';
               <input id="meta-date" type="datetime-local" />
             </label>
             <label>
-              파일 경로 (URL)
-              <input id="meta-slug" placeholder="spring/jpa-n-plus-1" autocomplete="off" />
+              <span>글 이름 <small>(영문, 주소 끝부분)</small></span>
+              <input id="meta-slug" placeholder="jpa-n-plus-1" autocomplete="off" />
               <small id="meta-slug-hint" class="admin-muted"></small>
             </label>
             <label class="full">

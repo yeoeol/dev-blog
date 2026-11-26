@@ -7,7 +7,8 @@ const AUTH_KEY = 'blog-admin-auth';
 const PENDING_IMAGE_DIR = './images/__pending__/';
 /** 관리자 화면의 저장이 쌓이는 작업 브랜치 */
 const WORK_BRANCH = 'writing';
-const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]*(\/[a-z0-9][a-z0-9-]*)*$/;
+/** 글 이름(파일명): 영문 소문자, 숫자, - */
+const NAME_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
 
 interface Auth {
   token: string;
@@ -425,6 +426,49 @@ function autoDraftPath(): string {
 }
 
 const isAutoDraftPath = (path: string | null) => path !== null && path.startsWith(DRAFT_DIR);
+
+/** 카테고리 "Backend/Spring" → 폴더 "backend/spring" (블로그 카테고리 URL 과 같은 규칙) */
+function categoryFolder(category: string): string {
+  return category
+    .split('/')
+    .map((segment) =>
+      segment
+        .trim()
+        .toLowerCase()
+        .replace(/[\s_]+/g, '-')
+        .replace(/[^\p{L}\p{N}.+-]/gu, '')
+        .replace(/-+/g, '-')
+        .replace(/^[-.]+|-+$/g, ''),
+    )
+    .filter(Boolean)
+    .join('/');
+}
+
+/** 카테고리 폴더 + 글 이름으로 만든 글 파일 경로. 둘 중 하나라도 없으면 null */
+function plannedPath(category: string, name: string): string | null {
+  const folder = categoryFolder(category);
+  return folder && name ? `${POSTS_DIR}${folder}/${name}.md` : null;
+}
+
+/** 발행된 글의 고정 경로 (발행 전이면 null) */
+let lockedPostPath: string | null = null;
+
+function updatePathPreview() {
+  const hint = $('#meta-slug-hint');
+  if (lockedPostPath) {
+    hint.textContent = `주소: /posts/${postId(lockedPostPath)}/ — 발행된 글은 카테고리를 바꿔도 주소가 유지됩니다.`;
+    return;
+  }
+  const name = $<HTMLInputElement>('#meta-slug').value.trim();
+  if (name && !NAME_PATTERN.test(name)) {
+    hint.textContent = '영문 소문자, 숫자, - 만 사용할 수 있습니다.';
+    return;
+  }
+  const planned = plannedPath($<HTMLInputElement>('#meta-category').value, name);
+  hint.textContent = planned
+    ? `주소: /posts/${postId(planned)}/`
+    : '카테고리와 글 이름으로 주소가 정해집니다. 임시저장은 비워 둬도 됩니다.';
+}
 type PostState = 'new' | 'draft' | 'private' | 'published';
 
 function postState(meta: PostMeta | null | undefined, path: string | null): PostState {
@@ -467,11 +511,10 @@ function fillForm(meta: PostMeta | null, path: string | null) {
   const state = postState(meta, path);
   const published = state === 'published';
   const slug = $<HTMLInputElement>('#meta-slug');
-  slug.value = path && !isAutoDraftPath(path) ? postId(path) : '';
+  slug.value = path && !isAutoDraftPath(path) ? baseNameOf(path) : '';
   slug.disabled = published;
-  $('#meta-slug-hint').textContent = published
-    ? '발행된 글의 경로(URL)는 바뀌지 않습니다.'
-    : '발행 전까지 비워 둘 수 있습니다. 영문 소문자, 숫자, -, / 만 사용. 예: spring/jpa-n-plus-1';
+  lockedPostPath = published ? path : null;
+  updatePathPreview();
 
   $('#post-state').textContent = { new: '새 글', draft: '임시저장 글', private: '비공개 글', published: '발행된 글' }[state];
   $('#post-state').dataset.state = state;
@@ -617,21 +660,24 @@ async function savePost(mode: SaveMode) {
   const meta = readForm(mode);
   if (!meta.title) return toast('제목을 입력하세요.', 'error');
   if (!draft && !meta.category) return toast(`${finishLabel}하려면 카테고리를 입력하세요.`, 'error');
-  if (draft && !meta.category) meta.category = '미분류';
+  const categoryEntered = meta.category !== '';
+  if (!categoryEntered) meta.category = '미분류';
 
-  // 저장할 경로 결정: 발행 전 글만 경로를 바꿀 수 있다
-  const slug = $<HTMLInputElement>('#meta-slug').value.trim();
+  // 저장할 경로 결정: 카테고리 폴더 + 글 이름. 발행된 글은 경로를 바꾸지 않는다
+  const name = $<HTMLInputElement>('#meta-slug').value.trim();
+  if (name && !NAME_PATTERN.test(name)) return toast('글 이름은 영문 소문자, 숫자, - 만 사용할 수 있습니다.', 'error');
   let path: string;
+  const planned = categoryEntered ? plannedPath(meta.category, name) : null;
   if (isPublished()) {
     path = editing.path!;
-  } else if (slug) {
-    if (!SLUG_PATTERN.test(slug)) return toast('파일 경로는 영문 소문자, 숫자, -, / 만 사용할 수 있습니다.', 'error');
-    if (`${POSTS_DIR}${slug}.md`.startsWith(DRAFT_DIR)) return toast('drafts/ 는 임시저장용 경로입니다. 다른 경로를 입력하세요.', 'error');
-    path = `${POSTS_DIR}${slug}.md`;
+  } else if (planned) {
+    if (planned.startsWith(DRAFT_DIR)) return toast("'drafts' 는 임시저장용 폴더라 카테고리 이름으로 쓸 수 없습니다.", 'error');
+    path = planned;
   } else if (!draft) {
     $<HTMLInputElement>('#meta-slug').focus();
-    return toast(`${finishLabel}하려면 파일 경로(URL)를 입력하세요.`, 'error');
+    return toast(`${finishLabel}하려면 글 이름(영문)을 입력하세요.`, 'error');
   } else {
+    // 임시저장: 카테고리·글 이름이 다 정해지기 전까지는 현재 경로(또는 임시 경로) 유지
     path = editing.path ?? autoDraftPath();
   }
   const previousPath = editing.path;
@@ -736,6 +782,8 @@ function setupEditor() {
     savePost('private');
   });
   $('#view-editor .admin-meta').addEventListener('input', () => setDirty(true));
+  $('#meta-category').addEventListener('input', updatePathPreview);
+  $('#meta-slug').addEventListener('input', updatePathPreview);
   $('#delete-post').addEventListener('click', async () => {
     if (!editing?.path || !editing.sha) return;
     try {
