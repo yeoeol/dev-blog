@@ -33,9 +33,9 @@ export function categoryPath(category: string): string {
   return categorySegments(category).map(slugify).join('/');
 }
 
-/** 배포 빌드에서는 draft 글을 제외하고 최신순으로 정렬한 글 목록 */
+/** 배포 빌드에서는 임시저장(draft)·비공개(private) 글을 제외하고 최신순으로 정렬한 글 목록 */
 export async function getPublishedPosts(): Promise<Post[]> {
-  const posts = await getCollection('posts', ({ data }) => import.meta.env.DEV || !data.draft);
+  const posts = await getCollection('posts', ({ data }) => import.meta.env.DEV || (!data.draft && !data.private));
   return posts.sort((a, b) => b.data.date.valueOf() - a.data.date.valueOf());
 }
 

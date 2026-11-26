@@ -46,6 +46,9 @@ export class GitHubClient {
   private async request<T>(path: string, init: RequestInit = {}, accept = 'application/vnd.github+json'): Promise<T> {
     const response = await fetch(`${API}${path}`, {
       ...init,
+      // GitHub API 응답은 max-age=60 으로 캐시된다. 캐시를 그대로 쓰면 방금 저장한 커밋 이전의
+      // 브랜치 정보를 읽어 다음 저장이 실패하므로, 매번 서버에 최신 여부를 확인한다(변경 없으면 304).
+      cache: 'no-cache',
       headers: {
         Accept: accept,
         Authorization: `Bearer ${this.token}`,
